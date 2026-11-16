@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: |cff9482c9DoTimer|r Plates
+## Notes: Lists every enemy carrying your Shadow Priest DoTs (talent-spread DoTs included), drawn by the game's native aura display. Companion to DoTimer Forever.
+## Notes-frFR: Liste des mobs portant tes DoTs de prêtre, propagation comprise, affichée par le cadre natif du jeu. Compagnon de DoTimer Forever.
+## Author: MrGrandjojo
+## Version: 1.3
+## X-Website: https://github.com/MrGrandjojo/DoTimerPlates
+## X-License: MIT
+## OptionalDeps: DoTimerForever
+## SavedVariables: DoTimerPlatesDB
+
+DoTimerPlates.lua

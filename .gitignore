@@ -1,0 +1,6 @@
+# Release archives built locally
+*.zip
+# OS / editor files
+.DS_Store
+Thumbs.db
+.vscode/
