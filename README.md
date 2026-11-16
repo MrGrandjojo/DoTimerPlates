@@ -1,6 +1,6 @@
 # DoTimer Plates
 
-A **WoW Forever** addon for Shadow Priests: a compact list of every enemy carrying your DoTs, with its name, health bar and one icon + countdown per DoT. **DoTs spread by talents are included**, such as Devouring Plague jumping to nearby enemies when its target dies.
+A **WoW Forever** addon for Shadow Priests and Warlocks: a compact list of every enemy carrying your DoTs, with its name, health bar and one icon + countdown per DoT. **DoTs spread by talents are included**, such as Devouring Plague jumping to nearby enemies when its target dies.
 
 It is built as a companion to **DoTimer Forever** (by Xunga) and copies its look, but it works on its own.
 
@@ -20,7 +20,12 @@ DoTimer Plates takes a different route. It uses the game's native aura display (
 - On first launch, the look of your DoTimer Forever profile is copied: sizes, colors, tenths of a second, warning threshold and blink rate.
 - Options window: `/dtp`, or right-click the anchor while it is unlocked.
 
-Tracked spells, all ranks: Shadow Word: Pain, Devouring Plague, Vampiric Touch, Void Plague, Hex of Weakness, Vampiric Embrace. The "All my debuffs" option shows every debuff you apply instead.
+Tracked spells, all ranks (the list follows your character's class):
+
+- **Shadow Priest:** Shadow Word: Pain, Devouring Plague, Vampiric Touch, Void Plague, Hex of Weakness, Vampiric Embrace.
+- **Warlock:** Corruption, Curse/Bane of Agony, Immolate, Siphon Life, Curse of the Elements, Curse of Weakness, Curse of Recklessness, Curse of Tongues, Curse of Exhaustion. Rank IDs come from DoTimer Forever's Warlock edition.
+
+Channels (Mind Flay, Drain Life, Drain Soul, Drain Mana, Wrack) are not shown: they are not DoTs. The "All my debuffs" option shows every debuff you apply instead, which is also a fallback if a spell or rank is missing from the list.
 
 ## Installation
 
@@ -47,7 +52,9 @@ These come from what the game allows, not from the addon:
 
 - **An enemy without a visible nameplate is not listed**, for example when it is too far away, off screen, or its nameplate is removed by the game (in instances this can happen when you change target). The "Nameplate range" option raises the game's nameplate distance.
 - **No predicted-damage bar and no fading icon.** Both would need the remaining time in Lua, which the game keeps secret. The warning blinks the countdown and the border instead.
-- **Shadow Priest only** for now. Other classes leave the addon idle.
+- **Shadow Priest and Warlock only** for now. Other classes leave the addon idle.
+- Warlock support is new: some WoW Forever-specific spells (runes, Curse of Doom, Curse of Shadow) are not in the list yet.
+- Settings are shared by all your characters (one position and look for the account).
 - The in-game texts (options, chat messages) are in **French** for now.
 - The rank IDs of Hex of Weakness above rank 1 are not verified in game.
 

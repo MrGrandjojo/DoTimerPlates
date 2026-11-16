@@ -1,7 +1,8 @@
 -- =========================================================================
--- DoTimer Plates v1.3
--- Liste des mobs qui portent tes DoTs de prêtre, avec nom, barre de vie et
--- timers, y compris les DoTs propagés par talent (Peste dévorante, Douleur).
+-- DoTimer Plates v1.4
+-- Liste des mobs qui portent tes DoTs (prêtre Ombre ou démoniste), avec nom,
+-- barre de vie et timers, y compris les DoTs propagés par talent (Peste
+-- dévorante, Douleur) ou posés sans lancer direct.
 -- Compagnon de DoTimer Forever : DoTimer n'est pas modifié.
 --
 -- Pourquoi un fonctionnement différent de DoTimer :
@@ -38,19 +39,37 @@
 -- =========================================================================
 
 local issecret = issecretvalue or function() return false end
-local ADDON_VERSION = "1.3"
+local ADDON_VERSION = "1.4"
 
 -- -------------------------------------------------------------------------
--- Sorts suivis : tous les rangs (le cadre natif compare les ID exacts)
+-- Sorts suivis par classe : tous les rangs (le cadre natif compare les ID
+-- exacts). Les canalisations (Fouet mental, Drains, Wrack) sont exclues :
+-- ce ne sont pas des DoTs.
 -- -------------------------------------------------------------------------
-local SPELL_IDS = {
-    589, 594, 970, 992, 2767, 10892, 10893, 10894,        -- Mot de l'ombre : Douleur r1-r8
-    2944, 19276, 19277, 19278, 19279, 19280,              -- Peste dévorante r1-r6
-    402668,                                               -- Toucher vampirique (rune)
-    425204,                                               -- Peste du Vide (rune)
-    9035, 19281, 19282, 19283, 19284, 19285,              -- Maléfice de faiblesse
-    15286,                                                -- Étreinte vampirique
+local CLASS_SPELLS = {
+    PRIEST = {
+        589, 594, 970, 992, 2767, 10892, 10893, 10894,        -- Mot de l'ombre : Douleur r1-r8
+        2944, 19276, 19277, 19278, 19279, 19280,              -- Peste dévorante r1-r6
+        402668,                                               -- Toucher vampirique (rune)
+        425204,                                               -- Peste du Vide (rune)
+        9035, 19281, 19282, 19283, 19284, 19285,              -- Maléfice de faiblesse
+        15286,                                                -- Étreinte vampirique
+    },
+    -- v1.4 : rangs repris de DoTimer Forever (Warlock.lua, relevés sur Forever)
+    WARLOCK = {
+        172, 6222, 6223, 7648, 11671, 11672, 25311,           -- Corruption r1-r7
+        980, 1014, 6217, 11711, 11712, 11713,                 -- Plaie / Malédiction d'agonie r1-r6
+        80240,                                                -- second fléau de DoTimer (à vérifier en jeu)
+        348, 707, 1094, 2941, 11665, 11667, 11668, 25309,     -- Immolation r1-r8
+        18265, 18879, 18880, 18881,                           -- Siphon de vie r1-r4
+        1490, 440892, 1311676, 1311677, 1311680,              -- Malédiction des éléments (ID Forever)
+        702, 1108, 6205, 7646, 11707, 11708,                  -- Malédiction de faiblesse r1-r6
+        704, 7658, 7659, 11717,                               -- Malédiction de témérité r1-r4
+        1714, 11719,                                          -- Malédiction des langages r1-r2
+        18223,                                                -- Malédiction d'épuisement
+    },
 }
+local SPELL_IDS        -- liste de la classe du personnage, choisie à la connexion
 local FILTER = "HARMFUL|PLAYER"   -- debuffs posés par toi
 
 -- -------------------------------------------------------------------------
@@ -848,8 +867,9 @@ ev:SetScript("OnEvent", function(self, event, unit)
 
     elseif event == "PLAYER_LOGIN" then
         local _, class = UnitClass("player")
-        if class ~= "PRIEST" then
-            Main:Hide()   -- seuls les DoTs de prêtre sont suivis
+        SPELL_IDS = CLASS_SPELLS[class]
+        if not SPELL_IDS then
+            Main:Hide()   -- classe sans liste de DoTs (prêtre et démoniste seulement)
             self:UnregisterAllEvents()
             return
         end
@@ -917,7 +937,7 @@ SlashCmdList["DOTIMERPLATES"] = function(msg)
     elseif cmd == "status" then
         Say(string.format("v%s, blocs : %d/%d, boutons natifs : %d + %d, écritures refusées : %d, filtre : %s",
             ADDON_VERSION, stats.built, MAX_PLATES, stats.headButtons, stats.iconButtons, stats.writeFails,
-            cfg.all and "tous tes debuffs" or "DoTs de prêtre"))
+            cfg.all and "tous tes debuffs" or "DoTs de ta classe"))
         local any = false
         for what, err in pairs(stats.errors) do any = true; Say("  erreur " .. what .. " : " .. err) end
         if not any then Say("  aucune erreur") end
