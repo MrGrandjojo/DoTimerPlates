@@ -3,6 +3,8 @@
 ## 1.4
 
 - Warlock support: Corruption, Curse/Bane of Agony, Immolate, Siphon Life and the curses (Elements, Weakness, Recklessness, Tongues, Exhaustion), all ranks. Rank IDs come from DoTimer Forever's Warlock edition. Channels (Drain Life, Drain Soul, Drain Mana, Wrack) are not shown.
+- Profiles: a shared "Commun" profile (your previous settings) plus optional per-character profiles, chosen in the options window.
+- Options window: the notes no longer hide behind the buttons.
 
 ## 1.3
 

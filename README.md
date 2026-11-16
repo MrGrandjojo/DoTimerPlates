@@ -19,6 +19,7 @@ DoTimer Plates takes a different route. It uses the game's native aura display (
 - Works in the open world and in instances, where enemy names are hidden from addons.
 - On first launch, the look of your DoTimer Forever profile is copied: sizes, colors, tenths of a second, warning threshold and blink rate.
 - Options window: `/dtp`, or right-click the anchor while it is unlocked.
+- Profiles: every character uses the shared **Commun** profile until you give it its own ("Profil propre à ce perso" copies the current settings). Use `<` / `>` to pick any existing profile, so several characters can share one.
 
 Tracked spells, all ranks (the list follows your character's class):
 
@@ -53,8 +54,8 @@ These come from what the game allows, not from the addon:
 - **An enemy without a visible nameplate is not listed**, for example when it is too far away, off screen, or its nameplate is removed by the game (in instances this can happen when you change target). The "Nameplate range" option raises the game's nameplate distance.
 - **No predicted-damage bar and no fading icon.** Both would need the remaining time in Lua, which the game keeps secret. The warning blinks the countdown and the border instead.
 - **Shadow Priest and Warlock only** for now. Other classes leave the addon idle.
-- Warlock support is new: some WoW Forever-specific spells (runes, Curse of Doom, Curse of Shadow) are not in the list yet.
-- Settings are shared by all your characters (one position and look for the account).
+- Warlock support is new and not tested in game yet: some WoW Forever-specific spells (runes, Curse of Doom, Curse of Shadow) are not in the list yet.
+- Profile changes are refused during combat.
 - The in-game texts (options, chat messages) are in **French** for now.
 - The rank IDs of Hex of Weakness above rank 1 are not verified in game.
 

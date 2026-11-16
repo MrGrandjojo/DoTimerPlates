@@ -35,6 +35,8 @@
 -- pas de barre de dégâts prévus (il faudrait connaître le temps restant en
 -- Lua). L'alerte d'expiration fait clignoter le timer et le bord, pas l'icône.
 --
+-- Profils (v1.4) : « Commun » partagé, ou un profil propre à un personnage.
+--
 -- Commandes : /dtp (réglages), /dtp lock, /dtp status, /dtp debug
 -- =========================================================================
 
@@ -92,8 +94,7 @@ local DEFAULTS = {
     warnTime       = 3,       -- s, comme le seuil de DoTimer
     blinkPeriod    = 1.2,     -- s par clignotement, comme DoTimer
     all            = false,   -- true : tous tes debuffs, pas seulement les DoTs
-    debug          = false,
-    nameColor      = { r = 1.00, g = 1.00, b = 1.00 },
+    nameColor     = { r = 1.00, g = 1.00, b = 1.00 },
     healthColor    = { r = 0.25, g = 0.85, b = 0.25 },
     timerTextColor = { r = 1.00, g = 1.00, b = 1.00 },
     warningColor   = { r = 1.00, g = 0.35, b = 0.20 },
@@ -106,15 +107,71 @@ local BLOCK_GAP   = 4      -- espace entre deux blocs, comme DoTimer
 local REFRESH     = 0.25   -- s : rafraîchissement des noms / flèches / vie
 local RAID_ICON_TEXT = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:16:16|t"
 
-local db                   -- = DoTimerPlatesDB
+-- v1.4 : profils. DoTimerPlatesDB = {
+--   profiles = { ["Commun"] = {réglages}, ["Perso - Royaume"] = {réglages} },
+--   chars    = { ["Perso - Royaume"] = nom du profil utilisé },
+--   version, debug }
+-- Un personnage sans profil choisi utilise "Commun".
+local DEFAULT_PROFILE = "Commun"
+local root                 -- = DoTimerPlatesDB
+local db                   -- profil actif du personnage
+local charKey              -- "Perso - Royaume"
 local cfg = {}             -- réglages figés au chargement (géométrie)
 
 local function CopyColor(c) return { r = c.r, g = c.g, b = c.b } end
+
+local function DeepCopy(t)
+    local out = {}
+    for k, v in pairs(t) do out[k] = type(v) == "table" and DeepCopy(v) or v end
+    return out
+end
 
 local function ApplyDefaults()
     for k, v in pairs(DEFAULTS) do
         if db[k] == nil then db[k] = type(v) == "table" and CopyColor(v) or v end
     end
+end
+
+-- Ouvre la base ; les réglages des versions 1.0-1.3 (un seul jeu pour le
+-- compte) deviennent le profil "Commun"
+local function InitProfiles()
+    DoTimerPlatesDB = DoTimerPlatesDB or {}
+    root = DoTimerPlatesDB
+    if type(root.profiles) ~= "table" then
+        local old = {}
+        for k, v in pairs(root) do old[k] = v end
+        for k in pairs(old) do root[k] = nil end
+        root.version, root.debug = old.version, old.debug
+        old.version, old.debug = nil, nil
+        root.profiles = { [DEFAULT_PROFILE] = old }
+    end
+    if type(root.chars) ~= "table" then root.chars = {} end
+    if type(root.profiles[DEFAULT_PROFILE]) ~= "table" then root.profiles[DEFAULT_PROFILE] = {} end
+    charKey = (UnitName("player") or "?") .. " - " .. (GetRealmName() or "?")
+end
+
+local function CurrentProfile()
+    local name = root.chars[charKey]
+    if not (name and root.profiles[name]) then name = DEFAULT_PROFILE end
+    return name
+end
+
+local function UseProfile(name)
+    if not root.profiles[name] then name = DEFAULT_PROFILE end
+    root.chars[charKey] = name
+    db = root.profiles[name]
+    ApplyDefaults()
+end
+
+-- "Commun" d'abord, puis les autres par ordre alphabétique
+local function ProfileNames()
+    local list = {}
+    for name in pairs(root.profiles) do
+        if name ~= DEFAULT_PROFILE then list[#list + 1] = name end
+    end
+    table.sort(list)
+    table.insert(list, 1, DEFAULT_PROFILE)
+    return list
 end
 
 -- Reprend l'apparence de DoTimer (profil actif) ; false s'il est absent
@@ -235,6 +292,11 @@ local function UpdateAnchorVisual()
     Main.bg:SetShown(not locked)
     Main.title:SetShown(not locked)
     Main:EnableMouse(not locked)
+end
+
+local function PlaceAnchor()
+    Main:ClearAllPoints()
+    Main:SetPoint(db.point or "CENTER", UIParent, db.relPoint or "CENTER", db.x or 250, db.y or 0)
 end
 
 local scalePending = false
@@ -451,7 +513,7 @@ local function BuildHeader(row, index)
     row.token = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
     row.token:SetText("np" .. index)
-    row.token:SetShown(db.debug == true)
+    row.token:SetShown(root.debug == true)
 end
 
 -- Bouton d'en-tête créé par le jeu : seulement dimensionné, rien dessus.
@@ -561,7 +623,7 @@ local function DebugBackground(c, r, g, b)
     local t = c:CreateTexture(nil, "BACKGROUND")
     t:SetAllPoints()
     t:SetColorTexture(r, g, b, 0.45)
-    t:SetShown(db.debug == true)
+    t:SetShown(root.debug == true)
     debugTextures[#debugTextures + 1] = t
 end
 
@@ -729,7 +791,7 @@ end
 
 local function BuildOptions()
     Options = CreateFrame("Frame", "DoTimerPlatesOptions", UIParent, "BackdropTemplate")
-    Options:SetSize(400, 510)
+    Options:SetSize(400, 670)
     Options:SetPoint("CENTER")
     Options:SetFrameStrata("DIALOG")
     Options:SetMovable(true)
@@ -787,26 +849,118 @@ local function BuildOptions()
             C_Timer.After(0.6, function() if Options.rangeToken == token then ApplyPlateRange(true) end end)
         end, GetPlateRange)
 
+    local function RefreshAll()
+        loading = true
+        for _, fn in ipairs(refreshers) do fn() end
+        loading = false
+    end
+
+    -- v1.4 : profils. "<" et ">" choisissent le profil de ce personnage parmi
+    -- ceux qui existent ; plusieurs persos peuvent partager le même profil.
+    local function Button(label, w, h)
+        local b = CreateFrame("Button", nil, Options, "UIPanelButtonTemplate")
+        b:SetSize(w, h)
+        b:SetText(label)
+        return b
+    end
+
+    local ph = Options:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    ph:SetPoint("TOPLEFT", 20, -400)
+    ph:SetText("Profil de ce personnage")
+
+    local prevP = Button("<", 28, 22)
+    prevP:SetPoint("TOPLEFT", 20, -420)
+    local pname = Options:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    pname:SetPoint("LEFT", prevP, "RIGHT", 4, 0)
+    pname:SetWidth(164)
+    pname:SetWordWrap(false)
+    local nextP = Button(">", 28, 22)
+    nextP:SetPoint("LEFT", pname, "RIGHT", 4, 0)
+    local delP = Button("Supprimer", 112, 22)
+    delP:SetPoint("TOPRIGHT", -20, -420)
+    local ownP = Button("Profil propre à ce perso", 228, 22)
+    ownP:SetPoint("TOPLEFT", 20, -448)
+
+    local function RefreshProfileUI()
+        local cur = CurrentProfile()
+        pname:SetText(cur == charKey and (cur .. " |cff888888(perso)|r") or cur)
+        local several = #ProfileNames() > 1
+        prevP:SetEnabled(several)
+        nextP:SetEnabled(several)
+        delP:SetText("Supprimer")
+        delP.confirm = nil
+        delP:SetEnabled(cur ~= DEFAULT_PROFILE)
+        ownP:SetEnabled(not root.profiles[charKey])
+    end
+    refreshers[#refreshers + 1] = RefreshProfileUI
+
+    -- sameSettings : le nouveau profil est une copie de l'actuel, pas de rechargement
+    local function SwitchProfile(name, sameSettings)
+        if InCombatLockdown() then Say("changement de profil impossible en combat.") return false end
+        UseProfile(name)
+        PlaceAnchor()
+        UpdateAnchorVisual()
+        ApplyScale()
+        ApplyPlateRange(false)
+        RefreshAll()
+        if not sameSettings then MarkReload() end
+        return true
+    end
+
+    local function Step(dir)
+        local list, cur = ProfileNames(), CurrentProfile()
+        local i = 1
+        for k, name in ipairs(list) do if name == cur then i = k end end
+        i = (i - 1 + dir) % #list + 1
+        if SwitchProfile(list[i]) then Say("profil « " .. list[i] .. " ».") end
+    end
+    prevP:SetScript("OnClick", function() Step(-1) end)
+    nextP:SetScript("OnClick", function() Step(1) end)
+
+    -- Copie du profil actuel, réservée à ce personnage
+    ownP:SetScript("OnClick", function()
+        if root.profiles[charKey] then return end
+        if InCombatLockdown() then Say("changement de profil impossible en combat.") return end
+        root.profiles[charKey] = DeepCopy(db)
+        if SwitchProfile(charKey, true) then
+            Say("profil propre à " .. charKey .. " créé (copie du profil précédent).")
+        end
+    end)
+
+    -- Suppression en deux clics ; les persos qui l'utilisaient reviennent à "Commun"
+    delP:SetScript("OnClick", function(self)
+        local cur = CurrentProfile()
+        if cur == DEFAULT_PROFILE then return end
+        if not self.confirm then
+            self.confirm = true
+            self:SetText("|cffff4040Confirmer ?|r")
+            C_Timer.After(3, function() if self.confirm then RefreshProfileUI() end end)
+            return
+        end
+        if InCombatLockdown() then Say("changement de profil impossible en combat.") return end
+        root.profiles[cur] = nil
+        for k, name in pairs(root.chars) do if name == cur then root.chars[k] = nil end end
+        if SwitchProfile(DEFAULT_PROFILE) then Say("profil « " .. cur .. " » supprimé, retour à « Commun ».") end
+    end)
+
     local note = Options:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    note:SetPoint("TOPLEFT", 20, -400)
+    note:SetPoint("TOPLEFT", 20, -482)
     note:SetWidth(360)
     note:SetJustifyH("LEFT")
     note:SetText("* appliqué après rechargement de l'interface.\n"
-        .. "« Tous mes debuffs » : affiche aussi tes autres affaiblissements, pas seulement les DoTs.\n"
-        .. "Portée : distance à laquelle le jeu affiche les barres de vie ; un mob plus loin sort de la liste.")
+        .. "« Tous mes debuffs » : affiche aussi tes autres affaiblissements.\n"
+        .. "Portée : distance d'affichage des barres de vie ; un mob plus loin sort de la liste.\n"
+        .. "Profil : « Commun » est partagé par les persos qui l'utilisent ; « Profil propre à ce perso » "
+        .. "en fait une copie modifiable pour ce seul personnage.")
 
-    local copy = CreateFrame("Button", nil, Options, "UIPanelButtonTemplate")
-    copy:SetSize(230, 24)
+    local copy = Button("Reprendre l'apparence de DoTimer", 230, 24)
     copy:SetPoint("BOTTOMLEFT", 20, 50)
-    copy:SetText("Reprendre l'apparence de DoTimer")
     copy:SetScript("OnClick", function()
         if CopyFromDoTimer() then
-            loading = true
-            for _, fn in ipairs(refreshers) do fn() end
-            loading = false
+            RefreshAll()
             ApplyScale()
             MarkReload()
-            Say("apparence de DoTimer recopiée.")
+            Say("apparence de DoTimer recopiée dans le profil « " .. CurrentProfile() .. " ».")
         else
             Say("DoTimer n'est pas chargé : rien à recopier.")
         end
@@ -825,9 +979,7 @@ local function BuildOptions()
     close:SetScript("OnClick", function() Options:Hide() end)
 
     Options:SetScript("OnShow", function()
-        loading = true
-        for _, fn in ipairs(refreshers) do fn() end
-        loading = false
+        RefreshAll()
         reloadButton:SetEnabled(reloadPending)
     end)
 end
@@ -841,7 +993,6 @@ end
 -- Événements : seulement nom / vie / cible ; les auras sont gérées par le jeu
 -- -------------------------------------------------------------------------
 local ev = CreateFrame("Frame")
-ev:RegisterEvent("ADDON_LOADED")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
 ev:RegisterEvent("NAME_PLATE_UNIT_ADDED")
@@ -851,21 +1002,17 @@ ev:RegisterEvent("UNIT_HEALTH")
 ev:RegisterEvent("RAID_TARGET_UPDATE")
 
 ev:SetScript("OnEvent", function(self, event, unit)
-    if event == "ADDON_LOADED" then
-        if unit == "DoTimerPlates" then
-            DoTimerPlatesDB = DoTimerPlatesDB or {}
-            db = DoTimerPlatesDB
-            if db.version ~= ADDON_VERSION then
-                db.debug = false        -- le mode debug des versions de test est coupé
-                db.version = ADDON_VERSION
-            end
-            ApplyDefaults()
-            Main:ClearAllPoints()
-            Main:SetPoint(db.point or "CENTER", UIParent, db.relPoint or "CENTER", db.x or 250, db.y or 0)
-            UpdateAnchorVisual()
+    if event == "PLAYER_LOGIN" then
+        -- Base et profil ouverts ici : le nom du perso et du royaume sont connus
+        InitProfiles()
+        if root.version ~= ADDON_VERSION then
+            root.debug = false        -- le mode debug des versions de test est coupé
+            root.version = ADDON_VERSION
         end
+        UseProfile(CurrentProfile())
+        PlaceAnchor()
+        UpdateAnchorVisual()
 
-    elseif event == "PLAYER_LOGIN" then
         local _, class = UnitClass("player")
         SPELL_IDS = CLASS_SPELLS[class]
         if not SPELL_IDS then
@@ -894,7 +1041,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
             pcall(row.head.UpdateAllAuras, row.head)
             pcall(row.icons.UpdateAllAuras, row.icons)
         end
-        if db.debug then
+        if root.debug then
             Say(string.format("[%.1f] barre de vie %s %s", GetTime(), tostring(unit),
                 event == "NAME_PLATE_UNIT_ADDED" and "|cff40ff40ajoutée|r" or "|cffff4040retirée par le jeu|r"))
         end
@@ -930,10 +1077,10 @@ SlashCmdList["DOTIMERPLATES"] = function(msg)
         Say(db.locked and "verrouillé" or "déverrouillé (glisse l'ancre pour la déplacer, clic droit = réglages)")
     elseif cmd == "debug" then
         -- fonds colorés (bleu = en-tête, rouge = icônes), jetons npN, journal
-        db.debug = not db.debug
-        for _, t in ipairs(debugTextures) do t:SetShown(db.debug) end
-        for _, row in ipairs(rows) do row.token:SetShown(db.debug) end
-        Say("mode debug " .. (db.debug and "activé" or "désactivé"))
+        root.debug = not root.debug
+        for _, t in ipairs(debugTextures) do t:SetShown(root.debug) end
+        for _, row in ipairs(rows) do row.token:SetShown(root.debug) end
+        Say("mode debug " .. (root.debug and "activé" or "désactivé"))
     elseif cmd == "status" then
         Say(string.format("v%s, blocs : %d/%d, boutons natifs : %d + %d, écritures refusées : %d, filtre : %s",
             ADDON_VERSION, stats.built, MAX_PLATES, stats.headButtons, stats.iconButtons, stats.writeFails,
