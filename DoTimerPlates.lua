@@ -87,6 +87,7 @@ local DEFAULTS = {
     growUp         = false,
     showNames      = true,
     showHealth     = true,
+    showHealthPct  = true,    -- v1.4 : % de vie à droite de la ligne du nom
     showRaidMarks  = true,
     showSwipe      = true,
     tenthsBelow    = 60,      -- dixièmes sous N s : 0 = jamais, 60 = toujours
@@ -215,17 +216,18 @@ local function ComputeConfig()
     cfg.growUp      = db.growUp
     cfg.showNames   = db.showNames
     cfg.showHealth  = db.showHealth
+    cfg.showPct     = db.showHealthPct
     cfg.showSwipe   = db.showSwipe
     cfg.tenthsBelow = db.tenthsBelow
     cfg.warn        = db.warnEnabled and db.warnTime > 0
     cfg.warnTime    = db.warnTime
     cfg.blinkPeriod = db.blinkPeriod
     cfg.all         = db.all
-    cfg.titleHeight = cfg.showNames and 15 or 0
+    cfg.titleHeight = (cfg.showNames or cfg.showPct) and 15 or 0
     cfg.healthY     = -cfg.titleHeight
     if cfg.showHealth then
         cfg.headerOffset = cfg.titleHeight + 6
-    elseif cfg.showNames then
+    elseif cfg.titleHeight > 0 then
         cfg.headerOffset = 16
     else
         cfg.headerOffset = 0
@@ -425,12 +427,31 @@ local function BorderFormatter()
     return cfg.borderFormatter or nil
 end
 
+-- % de vie : UnitHealthPercent si le jeu le fournit (une valeur secrète est
+-- transmise telle quelle à l'affichage), sinon calcul direct si lisible
+local SCALE_100 = CurveConstants and CurveConstants.ScaleTo100
+local function SetPercent(row, unit)
+    if UnitHealthPercent and SCALE_100 then
+        row.pct:SetFormattedText("%.0f%%", UnitHealthPercent(unit, true, SCALE_100))
+        return
+    end
+    local cur, max = UnitHealth(unit), UnitHealthMax(unit)
+    if issecret(cur) or issecret(max) then error("vie secrète") end
+    row.pct:SetFormattedText("%.0f%%", (max and max > 0) and cur / max * 100 or 0)
+end
+
 local function SetHealth(row)
     local unit = row.unit
-    Write(function()
-        row.health:SetMinMaxValues(0, UnitHealthMax(unit))
-        row.health:SetValue(UnitHealth(unit))
-    end)
+    if cfg.showHealth then
+        Write(function()
+            row.health:SetMinMaxValues(0, UnitHealthMax(unit))
+            row.health:SetValue(UnitHealth(unit))
+        end)
+    end
+    if cfg.showPct and not pcall(SetPercent, row, unit) then
+        stats.writeFails = stats.writeFails + 1
+        pcall(row.pct.SetText, row.pct, "")
+    end
 end
 
 -- Nom, niveau, flèches de cible, marque de raid et vie d'un bloc. Les valeurs
@@ -459,13 +480,14 @@ local function RefreshRow(row)
             row.raid:SetText(hasMark and string.format(RAID_ICON_TEXT, mark) or "")
             -- Le nom ne dépasse jamais la largeur du bloc (comme DoTimer)
             local room = cfg.width - TITLE_X - (target and 19 or 0) - (hasMark and 20 or 0)
+                - (cfg.showPct and 34 or 0)
             row.title:SetWidth(0)
             row.title:SetText(string.format("|cff%s[%s] %s|r", cfg.nameHex, lvlText, name))
             local natural = row.title:GetStringWidth()   -- secret pour un nom caché
             if issecret(natural) or (natural or 0) > room then row.title:SetWidth(math.max(room, 20)) end
         end)
     end
-    if cfg.showHealth then SetHealth(row) end
+    if cfg.showHealth or cfg.showPct then SetHealth(row) end
 end
 
 -- En-tête : NOTRE cadre, découpé à la taille du conteneur d'en-tête
@@ -509,9 +531,15 @@ local function BuildHeader(row, index)
     bg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
     row.health:SetShown(cfg.showHealth)
 
+    -- v1.4 : % de vie, à droite de la ligne du nom
+    row.pct = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.pct:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, -1)
+    row.pct:SetJustifyH("RIGHT")
+    row.pct:SetShown(cfg.showPct)
+
     -- Mode debug : numéro du jeton de barre de vie
     row.token = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
+    row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", cfg.showPct and -36 or 0, 0)
     row.token:SetText("np" .. index)
     row.token:SetShown(root.debug == true)
 end
@@ -827,6 +855,7 @@ local function BuildOptions()
     AddCheck(Options, "Voile sur les icônes", 20, -180, "showSwipe", true)
     AddCheck(Options, "Tous mes debuffs", 20, -206, "all", true)
     AddCheck(Options, "Alerte avant expiration", 20, -232, "warnEnabled", true)   -- v1.1
+    AddCheck(Options, "% de vie", 20, -258, "showHealthPct", true)                -- v1.4
 
     -- Colonne droite : tailles
     local function plain(v) return tostring(v) end
@@ -1051,7 +1080,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
 
     elseif event == "UNIT_HEALTH" then
         local row = rowByUnit[unit]
-        if row and cfg.showHealth then SetHealth(row) end
+        if row and (cfg.showHealth or cfg.showPct) then SetHealth(row) end
     end
 end)
 
