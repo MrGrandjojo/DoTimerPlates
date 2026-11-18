@@ -539,15 +539,10 @@ local function BuildHeader(row, index)
     over:SetFrameLevel(row.health:GetFrameLevel() + 2)
     row.pct = over:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.pct:SetPoint("CENTER", over, "CENTER", 0, 0)
-    -- Arial Narrow (police des chiffres de vie du jeu), plus grande, contour
-    -- et ombre noirs : lisible sur le vert vif. Police du jeu si refusée.
-    local okF, set = pcall(row.pct.SetFont, row.pct, "Fonts\\ARIALN.TTF", 11, "OUTLINE")
-    if not okF or set == false then
-        local font = GameFontHighlightSmall and GameFontHighlightSmall:GetFont()
-        if font then pcall(row.pct.SetFont, row.pct, font, 10, "OUTLINE") end
-    end
-    row.pct:SetShadowColor(0, 0, 0, 1)
-    row.pct:SetShadowOffset(1, -1)
+    -- Police des chiffres de vie du cadre de joueur de Blizzard
+    -- (TextStatusBarText : Arial Narrow, contour fin, sans ombre)
+    local fo = TextStatusBarText or NumberFontNormalSmall
+    if fo then pcall(row.pct.SetFontObject, row.pct, fo) end
     row.pct:SetShown(cfg.showPct)
 
     -- Mode debug : numéro du jeton de barre de vie
