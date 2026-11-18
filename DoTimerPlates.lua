@@ -225,8 +225,8 @@ local function ComputeConfig()
     cfg.all         = db.all
     cfg.titleHeight = cfg.showNames and 15 or 0
     cfg.healthY     = -cfg.titleHeight
-    -- La barre s'épaissit (3 -> 10 px) pour loger le % de vie en son milieu
-    cfg.barHeight   = cfg.showPct and 10 or 3
+    -- La barre s'épaissit (3 -> 5 px) pour porter le % de vie en son milieu
+    cfg.barHeight   = cfg.showPct and 5 or 3
     if cfg.showHealth or cfg.showPct then
         cfg.headerOffset = cfg.titleHeight + cfg.barHeight + 3
     elseif cfg.showNames then
