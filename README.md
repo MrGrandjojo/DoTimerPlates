@@ -18,8 +18,9 @@ DoTimer Plates takes a different route. It uses the game's native aura display (
 - Enemies without your DoTs take no space; the list stays compact.
 - Works in the open world and in instances, where enemy names are hidden from addons.
 - On first launch, the look of your DoTimer Forever profile is copied: sizes, colors, tenths of a second, warning threshold and blink rate.
-- Options window: `/dtp`, or right-click the anchor while it is unlocked.
-- Profiles: every character uses the shared **Commun** profile until you give it its own ("Profil propre à ce perso" copies the current settings). Use `<` / `>` to pick any existing profile, so several characters can share one.
+- Options window with tabs (General, Layout, Icons, Profiles): `/dtp`, or right-click the anchor while it is unlocked. Changes apply immediately (at the end of combat if you are fighting).
+- Preview with fake targets (1 to 10) to tune the look without fighting: the « Aperçu avec des cibles fictives » box at the bottom of the window, or `/dtp test`.
+- Profiles, like DoTimer Forever: create a profile with your own name (starting from the current settings), pick the profile of each character in a list, copy the settings of another profile, delete or reset one. Characters without a chosen profile use the shared **Commun** profile.
 
 Tracked spells, all ranks (the list follows your character's class):
 
@@ -41,11 +42,10 @@ If you download the repository with *Code → Download ZIP* instead, rename the 
 | Command | Effect |
 |---|---|
 | `/dtp` | Open / close the options window |
+| `/dtp test` | Show / hide the preview with fake targets |
 | `/dtp lock` | Lock / unlock the anchor (drag it while unlocked) |
 | `/dtp status` | Diagnostics: build state and anything the game refused |
 | `/dtp debug` | Debug mode: colored container backgrounds, nameplate tokens, nameplate log |
-
-Settings marked `*` in the options window take effect after reloading the UI (the window has a reload button).
 
 ## Known limitations
 
@@ -55,7 +55,7 @@ These come from what the game allows, not from the addon:
 - **No predicted-damage bar and no fading icon.** Both would need the remaining time in Lua, which the game keeps secret. The warning blinks the countdown and the border instead.
 - **Shadow Priest and Warlock only** for now. Other classes leave the addon idle.
 - Warlock support is new and not tested in game yet: some WoW Forever-specific spells (runes, Curse of Doom, Curse of Shadow) are not in the list yet.
-- Profile changes are refused during combat.
+- Profile changes are refused during combat, and the preview turns off when combat starts.
 - The in-game texts (options, chat messages) are in **French** for now.
 - The rank IDs of Hex of Weakness above rank 1 are not verified in game.
 

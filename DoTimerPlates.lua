@@ -35,9 +35,14 @@
 -- pas de barre de dégâts prévus (il faudrait connaître le temps restant en
 -- Lua). L'alerte d'expiration fait clignoter le timer et le bord, pas l'icône.
 --
--- Profils (v1.4) : « Commun » partagé, ou un profil propre à un personnage.
+-- Profils (v1.4) : profils nommés, partagés ou non entre personnages
+-- (« Commun » par défaut), copie des réglages d'un profil à l'autre.
+-- Réglages appliqués en direct (v1.4) : les boutons créés par le jeu sont
+-- gardés en liste et remis en forme à chaque changement (hors combat).
+-- Mode test (v1.4) : des cibles fictives, dessinées par l'addon, pour voir
+-- l'apparence sans combattre.
 --
--- Commandes : /dtp (réglages), /dtp lock, /dtp status, /dtp debug
+-- Commandes : /dtp (réglages), /dtp test, /dtp lock, /dtp status, /dtp debug
 -- =========================================================================
 
 local issecret = issecretvalue or function() return false end
@@ -95,6 +100,7 @@ local DEFAULTS = {
     warnTime       = 3,       -- s, comme le seuil de DoTimer
     blinkPeriod    = 1.2,     -- s par clignotement, comme DoTimer
     all            = false,   -- true : tous tes debuffs, pas seulement les DoTs
+    testCount      = 5,       -- v1.4 : nombre de cibles du mode test
     nameColor     = { r = 1.00, g = 1.00, b = 1.00 },
     healthColor    = { r = 0.25, g = 0.85, b = 0.25 },
     timerTextColor = { r = 1.00, g = 1.00, b = 1.00 },
@@ -239,6 +245,11 @@ local function ComputeConfig()
     end
     cfg.iconFontSize   = math.max(9, math.floor(cfg.iconSize * 0.38))
     cfg.iconCellHeight = cfg.iconSize + cfg.iconFontSize + 3
+    -- hauteur des éléments des conteneurs : +1, le pixel du conteneur vide
+    cfg.headH = BLOCK_GAP + cfg.headerOffset + 1
+    cfg.iconH = cfg.iconCellHeight + 1
+    -- formateurs de texte refaits avec les nouveaux réglages
+    cfg.textOptions, cfg.borderFormatter = nil, nil
     local nc = db.nameColor
     cfg.nameHex = string.format("%02x%02x%02x", math.floor(nc.r * 255), math.floor(nc.g * 255), math.floor(nc.b * 255))
 end
@@ -459,6 +470,19 @@ local function SetHealth(row)
     end
 end
 
+-- [>>] [niveau] nom [<<] [marque] ; le nom ne dépasse jamais la largeur du
+-- bloc (comme DoTimer). Commun aux vrais blocs et à ceux du mode test.
+local function SetTitle(row, lvlText, name, target, hasMark, mark)
+    row.arrow:SetText(target and "|cffff2020>>|r" or "")
+    row.tail:SetText(target and "|cffff2020<<|r" or "")
+    row.raid:SetText(hasMark and string.format(RAID_ICON_TEXT, mark) or "")
+    local room = cfg.width - TITLE_X - (target and 19 or 0) - (hasMark and 20 or 0)
+    row.title:SetWidth(0)
+    row.title:SetText(string.format("|cff%s[%s] %s|r", cfg.nameHex, lvlText, name))
+    local natural = row.title:GetStringWidth()   -- secret pour un nom caché
+    if issecret(natural) or (natural or 0) > room then row.title:SetWidth(math.max(room, 20)) end
+end
+
 -- Nom, niveau, flèches de cible, marque de raid et vie d'un bloc. Les valeurs
 -- secrètes (instances) sont seulement transmises à l'affichage, jamais lues.
 local function RefreshRow(row)
@@ -478,32 +502,23 @@ local function RefreshRow(row)
             local okM, m = pcall(GetRaidTargetIndex, unit)
             if okM then mark, hasMark = m, issecret(m) or m ~= nil end
         end
-
-        Write(function()
-            row.arrow:SetText(target and "|cffff2020>>|r" or "")
-            row.tail:SetText(target and "|cffff2020<<|r" or "")
-            row.raid:SetText(hasMark and string.format(RAID_ICON_TEXT, mark) or "")
-            -- Le nom ne dépasse jamais la largeur du bloc (comme DoTimer)
-            local room = cfg.width - TITLE_X - (target and 19 or 0) - (hasMark and 20 or 0)
-            row.title:SetWidth(0)
-            row.title:SetText(string.format("|cff%s[%s] %s|r", cfg.nameHex, lvlText, name))
-            local natural = row.title:GetStringWidth()   -- secret pour un nom caché
-            if issecret(natural) or (natural or 0) > room then row.title:SetWidth(math.max(room, 20)) end
-        end)
+        Write(SetTitle, row, lvlText, name, target, hasMark, mark)
     end
     if cfg.showHealth or cfg.showPct then SetHealth(row) end
 end
 
--- En-tête : NOTRE cadre, découpé à la taille du conteneur d'en-tête
-local function BuildHeader(row, index)
-    local clip = NewPlainFrame(Main)
+-- En-tête : NOTRE cadre, découpé à la taille du conteneur d'en-tête (row.head).
+-- Créé une fois ; tailles, positions et couleurs posées par StyleHeader.
+local function CreateHeader(row, parent, index)
+    local clip = NewPlainFrame(parent)
     clip:SetPoint("TOPLEFT", row.head, "TOPLEFT", 0, 0)
     clip:SetPoint("BOTTOMRIGHT", row.head, "BOTTOMRIGHT", 0, 0)
     clip:SetClipsChildren(true)
+    row.clip = clip
 
     local h = CreateFrame("Frame", nil, clip)
     h:SetPoint("TOPLEFT", clip, "TOPLEFT", 0, -BLOCK_GAP)
-    h:SetSize(cfg.width, math.max(cfg.headerOffset, 1))
+    row.h = h
 
     -- [>>] [niveau] nom [<<] [marque], comme DoTimer
     row.title = h:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -516,29 +531,19 @@ local function BuildHeader(row, index)
     row.tail:SetPoint("LEFT", row.title, "RIGHT", 3, 0)
     row.raid = h:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     row.raid:SetPoint("LEFT", row.tail, "RIGHT", 4, 0)
-    row.title:SetShown(cfg.showNames)
-    row.arrow:SetShown(cfg.showNames)
-    row.tail:SetShown(cfg.showNames)
-    row.raid:SetShown(cfg.showNames)
 
-    -- Barre de vie : fine ligne de 3 px, couleur et fond de DoTimer
-    local c = db.healthColor
+    -- Barre de vie : couleur et fond de DoTimer
     row.health = CreateFrame("StatusBar", nil, h)
-    row.health:SetPoint("TOPLEFT", h, "TOPLEFT", 0, cfg.healthY)
-    row.health:SetSize(cfg.barWidth, cfg.barHeight)
     row.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-    row.health:SetStatusBarColor(c.r, c.g, c.b)
     row.health:SetMinMaxValues(0, 1)
     row.health:SetValue(1)
     local bg = row.health:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
     bg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
-    row.health:SetShown(cfg.showHealth)
 
-    -- v1.4 : % de vie à droite de la barre, aligné sur le bord du bloc.
-    -- Rattaché à h : visible même sans barre.
+    -- % de vie à droite de la barre, aligné sur le bord du bloc. Rattaché à
+    -- h : visible même sans barre. Largeur libre : « 100% » jamais coupé.
     row.pct = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    -- Largeur libre : le texte prend sa taille réelle (« 100% » jamais coupé)
     row.pct:SetPoint("RIGHT", row.health, "RIGHT", PCT_WIDTH, 0)
     row.pct:SetJustifyH("RIGHT")
     row.pct:SetWordWrap(false)
@@ -546,44 +551,65 @@ local function BuildHeader(row, index)
     -- (TextStatusBarText : Arial Narrow, contour fin, sans ombre)
     local fo = TextStatusBarText or NumberFontNormalSmall
     if fo then pcall(row.pct.SetFontObject, row.pct, fo) end
-    row.pct:SetShown(cfg.showPct)
 
     -- Mode debug : numéro du jeton de barre de vie
-    row.token = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
-    row.token:SetText("np" .. index)
-    row.token:SetShown(root.debug == true)
+    if index then
+        row.token = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+        row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
+        row.token:SetText("np" .. index)
+        row.token:SetShown(root.debug == true)
+    end
 end
 
--- Bouton d'en-tête créé par le jeu : seulement dimensionné, rien dessus.
--- Sa présence (1 aura au plus) donne la taille du conteneur d'en-tête.
+local function StyleHeader(row)
+    row.h:SetSize(cfg.width, math.max(cfg.headerOffset, 1))
+    for _, fs in ipairs({ row.title, row.arrow, row.tail, row.raid }) do fs:SetShown(cfg.showNames) end
+    local c = db.healthColor
+    -- Avec le % : barre de 5 px raccourcie ; sinon la fine ligne de 3 px de DoTimer
+    row.health:ClearAllPoints()
+    row.health:SetPoint("TOPLEFT", row.h, "TOPLEFT", 0, cfg.healthY)
+    row.health:SetSize(cfg.barWidth, cfg.barHeight)
+    row.health:SetStatusBarColor(c.r, c.g, c.b)
+    row.health:SetShown(cfg.showHealth)
+    row.pct:SetShown(cfg.showPct)
+end
+
+-- Boutons créés par le jeu, gardés pour être remis en forme quand un réglage
+-- change (comme ForeverAuras)
+local headButtons, iconButtons = {}, {}
+
+-- Bouton d'en-tête : seulement dimensionné, rien dessus. Sa présence
+-- (1 aura au plus) donne la taille du conteneur d'en-tête.
+local function StyleHead(button)
+    Try("taille bouton en-tête", button, "SetSize", cfg.width, cfg.headH)
+end
+
 local function InitHead(button)
     stats.headButtons = stats.headButtons + 1
+    headButtons[#headButtons + 1] = button
     pcall(button.EnableMouse, button, false)
-    Try("taille bouton en-tête", button, "SetSize", cfg.width, BLOCK_GAP + cfg.headerOffset + 1)
+    StyleHead(button)
 end
 
--- Bouton d'icône créé par le jeu : case comme DoTimer (icône rognée sur un
--- bord noir de 1 px, voile, timer dessous). Icône, voile et texte sont
--- remplis par le jeu.
-local function InitIcon(button)
-    stats.iconButtons = stats.iconButtons + 1
+-- Case d'icône comme DoTimer (icône rognée sur un bord noir de 1 px, voile,
+-- timer dessous). Icône, voile et texte sont remplis par le jeu.
+-- Couches, de l'arrière vers l'avant (v1.3) :
+--   ring     : cadre découpé (clip) à la taille exacte de la case, qui
+--              reçoit le carré d'alerte : seule la bande d'1 px autour de
+--              l'icône reste visible = bord fin, comme DoTimer
+--   iconLayer: l'icône (rognée d'1 px) et le voile, au-dessus du carré
+local function CreateIconParts(button)
     pcall(button.EnableMouse, button, false)
-    local size = cfg.iconSize
-    Try("taille bouton icône", button, "SetSize", size, cfg.iconCellHeight + 1)
+    local p = {}
+    button.dtp = p
 
     local cell = CreateFrame("Frame", nil, button)
     cell:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
-    cell:SetSize(size, size)
+    p.cell = cell
     local border = cell:CreateTexture(nil, "BACKGROUND")
     border:SetAllPoints()
     border:SetColorTexture(0, 0, 0, 1)
 
-    -- v1.3 : trois couches, de l'arrière vers l'avant :
-    --   ring     : cadre découpé (clip) à la taille exacte de la case, qui
-    --              reçoit le carré d'alerte : seule la bande d'1 px autour de
-    --              l'icône reste visible = bord fin, comme DoTimer
-    --   iconLayer: l'icône (rognée d'1 px) et le voile, au-dessus du carré
     local ring = CreateFrame("Frame", nil, cell)
     ring:SetAllPoints(cell)
     ring:SetClipsChildren(true)
@@ -597,53 +623,97 @@ local function InitIcon(button)
     local icon = iconLayer:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", cell, "TOPLEFT", 1, -1)
     icon:SetPoint("BOTTOMRIGHT", cell, "BOTTOMRIGHT", -1, 1)
+    p.icon = icon
     Try("icône (SetIcon)", button, "SetIcon", icon)
     pcall(icon.SetTexCoord, icon, 0.08, 0.92, 0.08, 0.92)
 
-    -- Voile et/ou bord d'alerte : tous deux portés par le cooldown
-    if cfg.showSwipe or cfg.warn then
-        local ok, cd = pcall(CreateFrame, "Cooldown", nil, iconLayer, "CooldownFrameTemplate")
-        if ok and cd then
-            cd:SetAllPoints(icon)
-            pcall(cd.SetReverse, cd, true)
-            pcall(cd.SetDrawEdge, cd, false)
-            pcall(cd.SetDrawBling, cd, false)
-            pcall(cd.SetDrawSwipe, cd, cfg.showSwipe)
-            pcall(cd.SetHideCountdownNumbers, cd, true)
-            cd.noCooldownCount = true   -- pas de second timer d'OmniCC & co
-            local border = cfg.warn and BorderFormatter()
-            local numbers = border and cd.GetCountdownFontString and cd:GetCountdownFontString()
-            if numbers then
-                -- Les "chiffres" du cooldown passent dans la couche découpée,
-                -- derrière l'icône : le carré, plus grand que la case, est
-                -- coupé net à ses bords
-                pcall(function()
-                    numbers:SetParent(ringHolder)
-                    numbers:SetDrawLayer("ARTWORK")
-                    numbers:ClearAllPoints()
-                    numbers:SetPoint("CENTER", cell, "CENTER", 0, 0)
-                end)
-                pcall(cd.SetHideCountdownNumbers, cd, false)
-                pcall(cd.SetUseAuraDisplayTime, cd, true)
-                pcall(cd.SetMinimumCountdownDuration, cd, 0)
-                Try("bord d'alerte (SetCountdownFormatter)", cd, "SetCountdownFormatter", border)
-            end
-            Try("voile (SetDurationCooldown)", button, "SetDurationCooldown", cd)
-        end
+    -- Voile et bord d'alerte : tous deux portés par le cooldown, créé dans
+    -- tous les cas pour pouvoir les activer plus tard sans recharger
+    local ok, cd = pcall(CreateFrame, "Cooldown", nil, iconLayer, "CooldownFrameTemplate")
+    if ok and cd then
+        p.cd = cd
+        cd:SetAllPoints(icon)
+        pcall(cd.SetReverse, cd, true)
+        pcall(cd.SetDrawEdge, cd, false)
+        pcall(cd.SetDrawBling, cd, false)
+        pcall(cd.SetHideCountdownNumbers, cd, true)
+        cd.noCooldownCount = true   -- pas de second timer d'OmniCC & co
+        -- Les "chiffres" du cooldown (le bord d'alerte, voir BorderFormatter)
+        -- passent dans la couche découpée, derrière l'icône : le carré, plus
+        -- grand que la case, est coupé net à ses bords
+        local numbers = cd.GetCountdownFontString and cd:GetCountdownFontString()
+        if numbers and pcall(function()
+            numbers:SetParent(ringHolder)
+            numbers:SetDrawLayer("ARTWORK")
+            numbers:ClearAllPoints()
+            numbers:SetPoint("CENTER", cell, "CENTER", 0, 0)
+        end) then p.numbers = numbers end
     end
 
     -- v1.3 : créé depuis le modèle du jeu, comme DoTimer : il garde l'ombre
     -- portée du modèle en plus du contour, d'où un texte plus contrasté
-    local text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    local font = GameFontHighlightSmall:GetFont()
-    text:SetFont(font, cfg.iconFontSize, "OUTLINE")
-    local tc = db.timerTextColor
-    text:SetTextColor(tc.r, tc.g, tc.b)
-    text:SetPoint("TOP", cell, "BOTTOM", 0, -2)
-    local opts = TextOptions()
-    if not (opts and pcall(button.SetDurationText, button, text, opts)) then
-        Try("timer (SetDurationText)", button, "SetDurationText", text)
+    p.text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    p.text:SetPoint("TOP", cell, "BOTTOM", 0, -2)
+end
+
+local function StyleIcon(button)
+    local p = button.dtp
+    local size = cfg.iconSize
+    Try("taille bouton icône", button, "SetSize", size, cfg.iconH)
+    p.cell:SetSize(size, size)
+
+    local cd = p.cd
+    if cd then
+        pcall(cd.SetDrawSwipe, cd, cfg.showSwipe)
+        local border = cfg.warn and p.numbers and BorderFormatter()
+        if border then
+            pcall(cd.SetHideCountdownNumbers, cd, false)
+            if not button.fake then pcall(cd.SetUseAuraDisplayTime, cd, true) end
+            pcall(cd.SetMinimumCountdownDuration, cd, 0)
+            Try("bord d'alerte (SetCountdownFormatter)", cd, "SetCountdownFormatter", border)
+        else
+            pcall(cd.SetHideCountdownNumbers, cd, true)
+        end
     end
+
+    local font = GameFontHighlightSmall:GetFont()
+    p.text:SetFont(font, cfg.iconFontSize, "OUTLINE")
+    local tc = db.timerTextColor
+    p.text:SetTextColor(tc.r, tc.g, tc.b)
+    local opts = TextOptions()
+    if not (opts and pcall(button.SetDurationText, button, p.text, opts)) then
+        Try("timer (SetDurationText)", button, "SetDurationText", p.text)
+    end
+end
+
+local function InitIcon(button)
+    stats.iconButtons = stats.iconButtons + 1
+    iconButtons[#iconButtons + 1] = button
+    CreateIconParts(button)
+    StyleIcon(button)
+    if button.dtp.cd then Try("voile (SetDurationCooldown)", button, "SetDurationCooldown", button.dtp.cd) end
+end
+
+-- Empile des blocs { head, icons } à partir de prev ; renvoie le dernier
+-- cadre de la chaîne. Chaque élément a 1 pixel de plus que son contenu,
+-- chaque ancrage le retire (un conteneur vide ne prend aucune place).
+local function ChainBlocks(list, prev, first)
+    for _, b in ipairs(list) do
+        b.head:ClearAllPoints()
+        b.icons:ClearAllPoints()
+        if cfg.growUp then
+            -- vers le haut : icônes posées sur le bloc précédent, en-tête au-dessus
+            b.icons:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, first and BLOCK_GAP or -1)
+            b.head:SetPoint("BOTTOMLEFT", b.icons, "TOPLEFT", 0, -1)
+            prev = b.head
+        else
+            b.head:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, first and 0 or 1)
+            b.icons:SetPoint("TOPLEFT", b.head, "BOTTOMLEFT", 0, 1)
+            prev = b.icons
+        end
+        first = false
+    end
+    return prev
 end
 
 -- -------------------------------------------------------------------------
@@ -677,7 +747,12 @@ local function NewContainer(r, g, b)
     return c
 end
 
--- Règle un conteneur : unité, filtre, une file horizontale d'éléments w x h
+-- Mise en page d'un groupe : une file horizontale d'éléments w x h
+local function GroupLayout(c, group, w, h, spacing)
+    Try("mise en page " .. group, c, "SetAuraGroupLayout", group, { elementWidth = w, elementHeight = h, elementSpacing = spacing })
+end
+
+-- Règle un conteneur : unité, filtre, mise en page
 local function Setup(c, unit, group, maxCount, w, h, spacing, init, sorted)
     if not Try("politique d'aura", c, "SetAuraProcessingPolicy", CustomAuraContainerAuraProcessingPolicy.None) then return false end
     Try("axe", c, "SetFlowLayoutAxis", AnchorUtil.FlowLayoutAxis.Horizontal)
@@ -686,7 +761,7 @@ local function Setup(c, unit, group, maxCount, w, h, spacing, init, sorted)
     if not Try("groupe " .. group, c, "AddAuraGroup", group, FILTER, {
         maxFrameCount = maxCount, candidateFilters = Candidates(), initializeFrame = init,
     }) then return false end
-    Try("mise en page " .. group, c, "SetAuraGroupLayout", group, { elementWidth = w, elementHeight = h, elementSpacing = spacing })
+    GroupLayout(c, group, w, h, spacing)
     -- Icônes triées par le jeu : la prochaine à expirer d'abord (comme DoTimer)
     if sorted and AuraContainerSortMethod and AuraContainerSortDirection then
         Try("tri par temps restant", c, "SetAuraGroupSortMethod", group,
@@ -699,6 +774,9 @@ local function Setup(c, unit, group, maxCount, w, h, spacing, init, sorted)
 end
 
 local built = false
+local chainTail = Main      -- dernier cadre de la liste (le mode test s'y accroche)
+local builtAll              -- valeur de « Tous mes debuffs » posée sur les conteneurs
+local builtUp               -- sens d'empilement des ancrages posés
 local function Build()
     if built then return end
     if InCombatLockdown() then return end   -- refait à la fin du combat
@@ -708,38 +786,224 @@ local function Build()
         if not ok then Fail("chargement de Blizzard_AuraContainer", reason) return end
     end
     Main:SetWidth(cfg.width)
+    builtAll, builtUp = cfg.all, cfg.growUp
 
-    local headH = BLOCK_GAP + cfg.headerOffset + 1      -- +1 : pixel du conteneur vide
-    local iconH = cfg.iconCellHeight + 1
-    local prev, first = Main, true
+    local prev = Main
     for i = 1, MAX_PLATES do
         local row = { unit = "nameplate" .. i }
         row.head = NewContainer(0, 0.4, 1)
         row.icons = NewContainer(1, 0, 0)
-        if not (row.head and row.icons) then return end
+        if not (row.head and row.icons) then break end
+        prev = ChainBlocks({ row }, prev, i == 1)
 
-        -- Chaîne d'ancrages ; chaque ancrage retire le pixel du conteneur précédent
-        if cfg.growUp then
-            -- vers le haut : icônes posées sur le bloc précédent, en-tête au-dessus
-            row.icons:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, first and BLOCK_GAP or -1)
-            row.head:SetPoint("BOTTOMLEFT", row.icons, "TOPLEFT", 0, -1)
-            prev = row.head
-        else
-            row.head:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, first and 0 or 1)
-            row.icons:SetPoint("TOPLEFT", row.head, "BOTTOMLEFT", 0, 1)
-            prev = row.icons
-        end
-        first = false
-
-        local okH = Setup(row.head, row.unit, "Head", 1, cfg.width, headH, 0, InitHead)
-        local okI = Setup(row.icons, row.unit, "Auras", MAX_ICONS, cfg.iconSize, iconH, cfg.iconSpacing, InitIcon, true)
-        if not (okH and okI) then return end
-        BuildHeader(row, i)
+        local okH = Setup(row.head, row.unit, "Head", 1, cfg.width, cfg.headH, 0, InitHead)
+        local okI = Setup(row.icons, row.unit, "Auras", MAX_ICONS, cfg.iconSize, cfg.iconH, cfg.iconSpacing, InitIcon, true)
+        if not (okH and okI) then break end
+        CreateHeader(row, Main, i)
+        StyleHeader(row)
 
         rows[i] = row
         rowByUnit[row.unit] = row
         stats.built = i
     end
+    chainTail = prev
+end
+
+-- -------------------------------------------------------------------------
+-- v1.4 : mode test. Des blocs fictifs, faits de NOS cadres (le cadre natif
+-- n'affiche que de vraies auras), avec la même mise en forme que les vrais.
+-- Ils s'accrochent après la liste réelle : ils ne la cachent jamais.
+-- Les timers sont calculés en Lua (ce sont de fausses auras) avec les mêmes
+-- règles que le formateur du jeu ; chaque fausse aura recommence à expiration.
+-- -------------------------------------------------------------------------
+local TEST_SPELLS = {   -- { sort, durée en s } : un DoT de chaque sorte
+    PRIEST  = { { 10894, 18 }, { 19280, 24 }, { 402668, 15 }, { 425204, 12 }, { 19285, 120 } },
+    WARLOCK = { { 25311, 18 }, { 11713, 24 }, { 25309, 15 }, { 18881, 30 }, { 11717, 120 } },
+}
+local TEST_HEALTH = { 100, 76, 52, 31, 12, 88, 64, 43, 20, 95 }
+local TEST_COUNTS = { 3, 2, 4, 1, 5 }
+local TEST_MAX    = 10
+local testList              -- TEST_SPELLS de la classe du personnage
+local testMode = false      -- jamais sauvegardé : coupé au rechargement
+local testBlocks = {}
+local Preview = CreateFrame("Frame", nil, Main)
+Preview:SetAllPoints(Main)
+Preview:Hide()
+
+local function SpellTexture(id)
+    local tex
+    if C_Spell and C_Spell.GetSpellTexture then
+        local ok, t = pcall(C_Spell.GetSpellTexture, id)
+        if ok then tex = t end
+    end
+    if not tex and GetSpellTexture then
+        local ok, t = pcall(GetSpellTexture, id)
+        if ok then tex = t end
+    end
+    return tex or "Interface\\Icons\\INV_Misc_QuestionMark"
+end
+
+-- Imite un bouton du jeu : les liaisons sont gardées, pas exécutées
+local function FakeButton(parent)
+    local b = CreateFrame("Frame", nil, parent)
+    b.fake = true
+    b.SetIcon = function() end
+    b.SetDurationCooldown = function() end
+    b.SetDurationText = function() end
+    return b
+end
+
+local function TestTimerText(rem)
+    local s
+    if rem >= 60 then
+        s = string.format("%d:%02d", math.floor(rem / 60), math.floor(rem % 60))
+    elseif cfg.tenthsBelow > 0 and rem < cfg.tenthsBelow then
+        s = string.format("%.1fs", rem)
+    else
+        s = string.format("%ds", math.ceil(rem))
+    end
+    if cfg.warn and rem < cfg.warnTime then
+        local c = db.warningColor
+        local k = math.floor(rem / (cfg.blinkPeriod / 2)) % 2 == 0 and 255 or 115
+        s = string.format("|cff%02x%02x%02x%s|r", math.floor(c.r * k), math.floor(c.g * k), math.floor(c.b * k), s)
+    end
+    return s
+end
+
+local function NewTestBlock(i)
+    local b = { auras = {}, order = {} }
+    b.head = NewPlainFrame(Preview)
+    b.icons = NewPlainFrame(Preview)
+    CreateHeader(b, Preview)
+    local now = GetTime()
+    local count = math.min(TEST_COUNTS[(i - 1) % #TEST_COUNTS + 1], #testList)
+    for k = 1, count do
+        local spell = testList[(i + k - 2) % #testList + 1]
+        local btn = FakeButton(b.icons)
+        CreateIconParts(btn)
+        btn.dtp.icon:SetTexture(SpellTexture(spell[1]))
+        -- départs décalés : certaines auras sont déjà proches de la fin
+        local a = { btn = btn, dur = spell[2], start = now - spell[2] * (((i * 7 + k * 3) % 10) / 10) * 0.9 }
+        if btn.dtp.cd then pcall(btn.dtp.cd.SetCooldown, btn.dtp.cd, a.start, a.dur) end
+        b.auras[k], b.order[k] = a, a
+    end
+    return b
+end
+
+local function FillTestHeader(b, i)
+    local mark = db.showRaidMarks and ({ [2] = 8, [3] = 1 })[i] or nil   -- crâne, étoile
+    local lvl = UnitLevel("player") or 60
+    if cfg.showNames then SetTitle(b, tostring(lvl + (i % 3)), "Cible de test " .. i, i == 1, mark ~= nil, mark) end
+    local v = TEST_HEALTH[(i - 1) % #TEST_HEALTH + 1]
+    b.health:SetMinMaxValues(0, 100)
+    b.health:SetValue(v)
+    b.pct:SetFormattedText("%d%%", v)
+end
+
+-- Timers des fausses auras, triés par temps restant comme ceux du jeu
+local function TickTestBlock(b, now)
+    for _, a in ipairs(b.auras) do
+        if now - a.start >= a.dur then
+            a.start = now
+            if a.btn.dtp.cd then pcall(a.btn.dtp.cd.SetCooldown, a.btn.dtp.cd, now, a.dur) end
+        end
+        a.rem = a.dur - (now - a.start)
+    end
+    table.sort(b.order, function(x, y) return x.rem < y.rem end)
+    for k, a in ipairs(b.order) do
+        a.btn:ClearAllPoints()
+        a.btn:SetPoint("TOPLEFT", b.icons, "TOPLEFT", (k - 1) * (cfg.iconSize + cfg.iconSpacing), 0)
+        a.btn.dtp.text:SetText(TestTimerText(a.rem))
+    end
+end
+
+local function LayoutPreview()
+    if not (testMode and testList) then Preview:Hide() return end
+    local n = math.min(math.max(db.testCount or 5, 1), TEST_MAX)
+    local list = {}
+    for i = 1, n do
+        local b = testBlocks[i] or NewTestBlock(i)
+        testBlocks[i] = b
+        list[i] = b
+        b.head:SetSize(cfg.width, cfg.headH)
+        b.icons:SetSize(cfg.width, cfg.iconH)
+        StyleHeader(b)
+        for _, a in ipairs(b.auras) do StyleIcon(a.btn) end
+        FillTestHeader(b, i)
+    end
+    for i, b in ipairs(testBlocks) do
+        local on = i <= n
+        b.head:SetShown(on)
+        b.icons:SetShown(on)
+        b.clip:SetShown(on)
+    end
+    ChainBlocks(list, chainTail, chainTail == Main)
+    Preview:Show()
+end
+
+local testElapsed = 0
+Preview:SetScript("OnUpdate", function(_, elapsed)
+    testElapsed = testElapsed + elapsed
+    if testElapsed < 0.05 then return end
+    testElapsed = 0
+    local now = GetTime()
+    for _, b in ipairs(testBlocks) do
+        if b.head:IsShown() then TickTestBlock(b, now) end
+    end
+end)
+
+local function SetTestMode(on)
+    testMode = on and testList ~= nil
+    LayoutPreview()
+end
+
+-- -------------------------------------------------------------------------
+-- v1.4 : réglages appliqués en direct. Hors combat, conteneurs, boutons du
+-- jeu et en-têtes sont remis en forme ; en combat, à la fin du combat.
+-- -------------------------------------------------------------------------
+local function Relayout()
+    Main:SetWidth(cfg.width)
+    -- les ancrages ne dépendent que du sens d'empilement
+    if cfg.growUp ~= builtUp then
+        builtUp = cfg.growUp
+        chainTail = ChainBlocks(rows, Main, true)
+    end
+    local filtersChanged = cfg.all ~= builtAll
+    builtAll = cfg.all
+    for _, row in ipairs(rows) do
+        GroupLayout(row.head, "Head", cfg.width, cfg.headH, 0)
+        GroupLayout(row.icons, "Auras", cfg.iconSize, cfg.iconH, cfg.iconSpacing)
+        if filtersChanged then
+            Try("filtre Head", row.head, "SetAuraGroupCandidateFilters", "Head", Candidates())
+            Try("filtre Auras", row.icons, "SetAuraGroupCandidateFilters", "Auras", Candidates())
+        end
+        StyleHeader(row)
+    end
+    for _, b in ipairs(headButtons) do StyleHead(b) end
+    for _, b in ipairs(iconButtons) do StyleIcon(b) end
+    for _, row in ipairs(rows) do
+        pcall(row.head.UpdateAllAuras, row.head)
+        pcall(row.icons.UpdateAllAuras, row.icons)
+        RefreshRow(row)
+    end
+    LayoutPreview()
+end
+
+local applyPending = false
+local function ApplySettings()
+    if not SPELL_IDS then return end
+    if InCombatLockdown() then applyPending = true return end
+    applyPending = false
+    ComputeConfig()
+    if built then Relayout() else Build() end
+end
+
+-- Pour les curseurs : appliqué quand on arrête de le bouger
+local applyToken = 0
+local function ScheduleApply()
+    applyToken = applyToken + 1
+    local token = applyToken
+    C_Timer.After(0.25, function() if token == applyToken then ApplySettings() end end)
 end
 
 -- -------------------------------------------------------------------------
@@ -775,48 +1039,45 @@ local function ApplyPlateRange(verbose)
 end
 
 -- -------------------------------------------------------------------------
--- Panneau de réglages (/dtp ou clic droit sur l'ancre)
+-- Panneau de réglages (/dtp ou clic droit sur l'ancre). v1.4 : onglets,
+-- sur le modèle de la fenêtre de DoTimer Forever 0.9.6.
 -- -------------------------------------------------------------------------
 local Options
-local refreshers, loading, reloadPending = {}, false, false
-local reloadButton
+local refreshers, loading = {}, false
 
-local function MarkReload()
-    reloadPending = true
-    if reloadButton then reloadButton:Enable() end
-end
-
-local function AddCheck(parent, label, x, y, key, needsReload, onChange)
+-- key : clé du profil, ou { get = fn, set = fn } pour un état hors profil
+local function AddCheck(parent, label, x, y, key, onChange)
     local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     cb:SetSize(24, 24)
-    cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    cb:SetPoint("TOPLEFT", Options, "TOPLEFT", x, y)
     cb.label = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     cb.label:SetPoint("LEFT", cb, "RIGHT", 4, 1)
-    cb.label:SetText(label .. (needsReload and " |cff888888*|r" or ""))
+    cb.label:SetText(label)
+    local get = type(key) == "table" and key.get or function() return db[key] == true end
+    local set = type(key) == "table" and key.set or function(v) db[key] = v end
     cb:SetScript("OnClick", function(self)
-        db[key] = self:GetChecked() and true or false
-        if needsReload then MarkReload() end
+        set(self:GetChecked() and true or false)
         if onChange then onChange() end
     end)
-    refreshers[#refreshers + 1] = function() cb:SetChecked(db[key] == true) end
+    refreshers[#refreshers + 1] = function() cb:SetChecked(get()) end
+    return cb
 end
 
-local function AddSlider(parent, label, lo, hi, step, x, y, key, needsReload, fmt, onChange, fallback)
+local function AddSlider(parent, label, lo, hi, step, x, y, key, fmt, onChange, fallback)
     local s = CreateFrame("Slider", nil, parent, "OptionsSliderTemplate")
-    s:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    s:SetWidth(150)
+    s:SetPoint("TOPLEFT", Options, "TOPLEFT", x, y)
+    s:SetWidth(170)
     s:SetMinMaxValues(lo, hi)
     s:SetValueStep(step)
     s:SetObeyStepOnDrag(true)
     s.Low:SetText(fmt(lo))
     s.High:SetText(fmt(hi))
-    local function Label(v) s.Text:SetText(label .. (needsReload and " |cff888888*|r" or "") .. " : " .. fmt(v)) end
+    local function Label(v) s.Text:SetText(label .. " : " .. fmt(v)) end
     s:SetScript("OnValueChanged", function(self, v)
         v = math.floor(v / step + 0.5) * step
         Label(v)
         if loading or db[key] == v then return end
         db[key] = v
-        if needsReload then MarkReload() end
         if onChange then onChange() end
     end)
     refreshers[#refreshers + 1] = function()
@@ -826,11 +1087,135 @@ local function AddSlider(parent, label, lo, hi, step, x, y, key, needsReload, fm
         s:SetValue(v)
         Label(v)
     end
+    return s
+end
+
+local function AddText(parent, font, text, x, y, width)
+    local fs = parent:CreateFontString(nil, "OVERLAY", font)
+    fs:SetPoint("TOPLEFT", Options, "TOPLEFT", x, y)
+    if width then
+        fs:SetWidth(width)
+        fs:SetJustifyH("LEFT")
+    end
+    fs:SetText(text)
+    return fs
+end
+
+local function AddButton(parent, label, w, h)
+    local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    b:SetSize(w, h)
+    b:SetText(label)
+    return b
+end
+
+-- Bouton en deux clics : le second, dans les 3 s, confirme
+local function Confirmable(b, label, action)
+    b:SetScript("OnClick", function(self)
+        if not self.confirm then
+            self.confirm = true
+            self:SetText("|cffff4040Confirmer ?|r")
+            C_Timer.After(3, function()
+                if self.confirm then self.confirm = nil; self:SetText(label) end
+            end)
+            return
+        end
+        self.confirm = nil
+        self:SetText(label)
+        action()
+    end)
+end
+
+-- Liste déroulante légère (comme DoTimer : pas d'UIDropDownMenu, source de
+-- taint connue)
+local ROW_HEIGHT = 18
+local function AddDropdown(parent, x, y, width, onPick)
+    local button = AddButton(parent, "", width, 22)
+    button:SetPoint("TOPLEFT", Options, "TOPLEFT", x, y)
+    local arrow = button:CreateTexture(nil, "OVERLAY")
+    arrow:SetSize(16, 16)
+    arrow:SetPoint("RIGHT", button, "RIGHT", -4, 0)
+    arrow:SetTexture("Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up")
+    local fs = button:GetFontString()
+    if fs then   -- un nom long est coupé au lieu de déborder du bouton
+        fs:SetWidth(width - 30)
+        fs:SetWordWrap(false)
+        fs:SetJustifyH("LEFT")
+        fs:ClearAllPoints()
+        fs:SetPoint("LEFT", button, "LEFT", 8, 0)
+    end
+
+    local menu = CreateFrame("Frame", nil, button, "BackdropTemplate")
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -2)
+    menu:SetWidth(width)
+    menu:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    menu:SetBackdropColor(0, 0, 0, 0.95)
+    menu:Hide()
+    menu.rows = {}
+    button.menu = menu
+
+    button.Fill = function(names, current)
+        for i, name in ipairs(names) do
+            local row = menu.rows[i]
+            if not row then
+                row = CreateFrame("Button", nil, menu)
+                row:SetHeight(ROW_HEIGHT)
+                row:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -6 - (i - 1) * ROW_HEIGHT)
+                row:SetPoint("RIGHT", menu, "RIGHT", -6, 0)
+                row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+                row.check = row:CreateTexture(nil, "ARTWORK")
+                row.check:SetSize(14, 14)
+                row.check:SetPoint("LEFT", row, "LEFT", 0, 0)
+                row.check:SetTexture("Interface\\Buttons\\UI-CheckBox-Check")
+                row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                row.label:SetPoint("LEFT", row.check, "RIGHT", 4, 0)
+                row.label:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+                row.label:SetJustifyH("LEFT")
+                row.label:SetWordWrap(false)
+                row:SetScript("OnClick", function(self)
+                    menu:Hide()
+                    onPick(self.name)
+                end)
+                menu.rows[i] = row
+            end
+            row.name = name
+            row.label:SetText(name)
+            row.check:SetShown(name == current)
+            row:Show()
+        end
+        for i = #names + 1, #menu.rows do menu.rows[i]:Hide() end
+        menu:SetHeight(12 + math.max(#names, 1) * ROW_HEIGHT)
+    end
+    return button
+end
+
+local function RefreshOptions()
+    if not (Options and Options:IsShown()) then return end
+    loading = true
+    for _, fn in ipairs(refreshers) do fn() end
+    loading = false
+end
+
+local function SwitchProfile(name)
+    if InCombatLockdown() then Say("changement de profil impossible en combat.") return false end
+    UseProfile(name)
+    PlaceAnchor()
+    UpdateAnchorVisual()
+    ApplyScale()
+    ApplyPlateRange(false)
+    RefreshOptions()
+    ApplySettings()
+    return true
 end
 
 local function BuildOptions()
     Options = CreateFrame("Frame", "DoTimerPlatesOptions", UIParent, "BackdropTemplate")
-    Options:SetSize(400, 670)
+    Options:SetSize(460, 470)
     Options:SetPoint("CENTER")
     Options:SetFrameStrata("DIALOG")
     Options:SetMovable(true)
@@ -855,173 +1240,213 @@ local function BuildOptions()
     title:SetPoint("TOP", 0, -16)
     title:SetText("|cff9482c9DoTimer|r Plates |cff888888v" .. ADDON_VERSION .. "|r")
 
-    -- Colonne gauche : affichage
-    AddCheck(Options, "Verrouiller", 20, -50, "locked", false, UpdateAnchorVisual)
-    AddCheck(Options, "Empiler vers le haut", 20, -76, "growUp", true)
-    AddCheck(Options, "Afficher les noms", 20, -102, "showNames", true)
-    AddCheck(Options, "Barre de vie", 20, -128, "showHealth", true)
-    AddCheck(Options, "Marques de raid", 20, -154, "showRaidMarks", false, function()
-        for _, row in ipairs(rows) do RefreshRow(row) end
-    end)
-    AddCheck(Options, "Voile sur les icônes", 20, -180, "showSwipe", true)
-    AddCheck(Options, "Tous mes debuffs", 20, -206, "all", true)
-    AddCheck(Options, "Alerte avant expiration", 20, -232, "warnEnabled", true)   -- v1.1
-    AddCheck(Options, "% de vie", 20, -258, "showHealthPct", true)                -- v1.4
+    -- Onglets : une page par onglet, coordonnées relatives à la fenêtre
+    local tabs = {}
+    local function SelectTab(index)
+        for i, tab in ipairs(tabs) do
+            local on = i == index
+            tab.page:SetShown(on)
+            tab.bg:SetColorTexture(on and 0.35 or 0.12, on and 0.30 or 0.12, on and 0.50 or 0.14, 0.95)
+            tab.label:SetTextColor(on and 1 or 0.7, on and 0.82 or 0.7, on and 0 or 0.7)
+            tab.underline:SetShown(on)
+        end
+    end
+    local function AddTab(label)
+        local index = #tabs + 1
+        local page = CreateFrame("Frame", nil, Options)
+        page:SetAllPoints(Options)
+        page:Hide()
+        local tab = CreateFrame("Button", nil, Options)
+        tab:SetHeight(22)
+        tab.bg = tab:CreateTexture(nil, "BACKGROUND")
+        tab.bg:SetAllPoints(tab)
+        tab.underline = tab:CreateTexture(nil, "ARTWORK")
+        tab.underline:SetPoint("BOTTOMLEFT", tab, "BOTTOMLEFT", 0, 0)
+        tab.underline:SetPoint("BOTTOMRIGHT", tab, "BOTTOMRIGHT", 0, 0)
+        tab.underline:SetHeight(2)
+        tab.underline:SetColorTexture(0.58, 0.51, 0.79, 1)   -- violet DoTimer
+        tab.label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        tab.label:SetPoint("CENTER", tab, "CENTER", 0, 1)
+        tab.label:SetText(label)
+        tab:SetWidth(math.max(80, (tab.label:GetStringWidth() or 0) + 24))
+        if index == 1 then
+            tab:SetPoint("TOPLEFT", Options, "TOPLEFT", 20, -46)
+        else
+            tab:SetPoint("LEFT", tabs[index - 1], "RIGHT", 4, 0)
+        end
+        tab.page = page
+        tab:SetScript("OnClick", function() SelectTab(index) end)
+        tabs[index] = tab
+        return page
+    end
+    local pGeneral = AddTab("Général")
+    local pLayout  = AddTab("Disposition")
+    local pIcons   = AddTab("Icônes")
+    local pProf    = AddTab("Profils")
 
-    -- Colonne droite : tailles
     local function plain(v) return tostring(v) end
-    AddSlider(Options, "Échelle", 0.5, 2, 0.05, 220, -60, "scale", false,
-        function(v) return string.format("%.2f", v) end, ApplyScale)
-    AddSlider(Options, "Largeur", 80, 300, 5, 220, -110, "width", true, plain)
-    AddSlider(Options, "Taille des icônes", 14, 40, 1, 220, -160, "iconSize", true, plain)
-    AddSlider(Options, "Espacement", 0, 10, 1, 220, -210, "iconSpacing", true, plain)
-    AddSlider(Options, "Dixièmes sous", 0, 60, 1, 220, -260, "tenthsBelow", true, function(v)
-        if v <= 0 then return "jamais" elseif v >= 60 then return "toujours" end
-        return v .. " s"
-    end)
-    -- v1.1 : seuil de l'alerte (timer qui clignote) et portée des barres de vie
-    AddSlider(Options, "Seuil d'alerte", 1, 10, 1, 220, -310, "warnTime", true, function(v) return v .. " s" end)
-    AddSlider(Options, "Portée barres de vie", 10, 60, 1, 220, -360, "plateRange", false,
+    local function seconds(v) return v .. " s" end
+
+    -- --- Général --------------------------------------------------------
+    AddCheck(pGeneral, "Verrouiller le cadre", 20, -84, "locked", UpdateAnchorVisual)
+    AddCheck(pGeneral, "Noms des cibles", 20, -110, "showNames", ApplySettings)
+    AddCheck(pGeneral, "Barre de vie", 20, -136, "showHealth", ApplySettings)
+    AddCheck(pGeneral, "% de vie", 20, -162, "showHealthPct", ApplySettings)
+    AddCheck(pGeneral, "Marqueurs de raid", 20, -188, "showRaidMarks", ApplySettings)
+    AddCheck(pGeneral, "Tous mes debuffs", 20, -214, "all", ApplySettings)
+    AddCheck(pGeneral, "Alerte de fin", 250, -84, "warnEnabled", ApplySettings)
+    AddSlider(pGeneral, "Seuil d'alerte", 1, 10, 1, 258, -134, "warnTime", seconds, ScheduleApply)
+    AddSlider(pGeneral, "Portée barres de vie", 10, 60, 1, 258, -186, "plateRange",
         function(v) return v .. " m" end, function()
             -- appliqué une fois le curseur relâché (pas un message par cran)
             local token = (Options.rangeToken or 0) + 1
             Options.rangeToken = token
             C_Timer.After(0.6, function() if Options.rangeToken == token then ApplyPlateRange(true) end end)
         end, GetPlateRange)
-
-    local function RefreshAll()
-        loading = true
-        for _, fn in ipairs(refreshers) do fn() end
-        loading = false
-    end
-
-    -- v1.4 : profils. "<" et ">" choisissent le profil de ce personnage parmi
-    -- ceux qui existent ; plusieurs persos peuvent partager le même profil.
-    local function Button(label, w, h)
-        local b = CreateFrame("Button", nil, Options, "UIPanelButtonTemplate")
-        b:SetSize(w, h)
-        b:SetText(label)
-        return b
-    end
-
-    local ph = Options:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    ph:SetPoint("TOPLEFT", 20, -400)
-    ph:SetText("Profil de ce personnage")
-
-    local prevP = Button("<", 28, 22)
-    prevP:SetPoint("TOPLEFT", 20, -420)
-    local pname = Options:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    pname:SetPoint("LEFT", prevP, "RIGHT", 4, 0)
-    pname:SetWidth(164)
-    pname:SetWordWrap(false)
-    local nextP = Button(">", 28, 22)
-    nextP:SetPoint("LEFT", pname, "RIGHT", 4, 0)
-    local delP = Button("Supprimer", 112, 22)
-    delP:SetPoint("TOPRIGHT", -20, -420)
-    local ownP = Button("Profil propre à ce perso", 228, 22)
-    ownP:SetPoint("TOPLEFT", 20, -448)
-
-    local function RefreshProfileUI()
-        local cur = CurrentProfile()
-        pname:SetText(cur == charKey and (cur .. " |cff888888(perso)|r") or cur)
-        local several = #ProfileNames() > 1
-        prevP:SetEnabled(several)
-        nextP:SetEnabled(several)
-        delP:SetText("Supprimer")
-        delP.confirm = nil
-        delP:SetEnabled(cur ~= DEFAULT_PROFILE)
-        ownP:SetEnabled(not root.profiles[charKey])
-    end
-    refreshers[#refreshers + 1] = RefreshProfileUI
-
-    -- sameSettings : le nouveau profil est une copie de l'actuel, pas de rechargement
-    local function SwitchProfile(name, sameSettings)
-        if InCombatLockdown() then Say("changement de profil impossible en combat.") return false end
-        UseProfile(name)
-        PlaceAnchor()
-        UpdateAnchorVisual()
-        ApplyScale()
-        ApplyPlateRange(false)
-        RefreshAll()
-        if not sameSettings then MarkReload() end
-        return true
-    end
-
-    local function Step(dir)
-        local list, cur = ProfileNames(), CurrentProfile()
-        local i = 1
-        for k, name in ipairs(list) do if name == cur then i = k end end
-        i = (i - 1 + dir) % #list + 1
-        if SwitchProfile(list[i]) then Say("profil « " .. list[i] .. " ».") end
-    end
-    prevP:SetScript("OnClick", function() Step(-1) end)
-    nextP:SetScript("OnClick", function() Step(1) end)
-
-    -- Copie du profil actuel, réservée à ce personnage
-    ownP:SetScript("OnClick", function()
-        if root.profiles[charKey] then return end
-        if InCombatLockdown() then Say("changement de profil impossible en combat.") return end
-        root.profiles[charKey] = DeepCopy(db)
-        if SwitchProfile(charKey, true) then
-            Say("profil propre à " .. charKey .. " créé (copie du profil précédent).")
-        end
-    end)
-
-    -- Suppression en deux clics ; les persos qui l'utilisaient reviennent à "Commun"
-    delP:SetScript("OnClick", function(self)
-        local cur = CurrentProfile()
-        if cur == DEFAULT_PROFILE then return end
-        if not self.confirm then
-            self.confirm = true
-            self:SetText("|cffff4040Confirmer ?|r")
-            C_Timer.After(3, function() if self.confirm then RefreshProfileUI() end end)
-            return
-        end
-        if InCombatLockdown() then Say("changement de profil impossible en combat.") return end
-        root.profiles[cur] = nil
-        for k, name in pairs(root.chars) do if name == cur then root.chars[k] = nil end end
-        if SwitchProfile(DEFAULT_PROFILE) then Say("profil « " .. cur .. " » supprimé, retour à « Commun ».") end
-    end)
-
-    local note = Options:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    note:SetPoint("TOPLEFT", 20, -482)
-    note:SetWidth(360)
-    note:SetJustifyH("LEFT")
-    note:SetText("* appliqué après rechargement de l'interface.\n"
-        .. "« Tous mes debuffs » : affiche aussi tes autres affaiblissements.\n"
-        .. "Portée : distance d'affichage des barres de vie ; un mob plus loin sort de la liste.\n"
-        .. "Profil : « Commun » est partagé par les persos qui l'utilisent ; « Profil propre à ce perso » "
-        .. "en fait une copie modifiable pour ce seul personnage.")
-
-    local copy = Button("Reprendre l'apparence de DoTimer", 230, 24)
-    copy:SetPoint("BOTTOMLEFT", 20, 50)
+    local copy = AddButton(pGeneral, "Reprendre l'apparence de DoTimer", 240, 22)
+    copy:SetPoint("TOPLEFT", Options, "TOPLEFT", 22, -256)
     copy:SetScript("OnClick", function()
         if CopyFromDoTimer() then
-            RefreshAll()
+            RefreshOptions()
             ApplyScale()
-            MarkReload()
+            ApplySettings()
             Say("apparence de DoTimer recopiée dans le profil « " .. CurrentProfile() .. " ».")
         else
             Say("DoTimer n'est pas chargé : rien à recopier.")
         end
     end)
+    AddText(pGeneral, "GameFontDisableSmall",
+        "Les réglages s'appliquent tout de suite (à la fin du combat si tu combats).\n"
+        .. "Tous mes debuffs : affiche aussi tes affaiblissements qui ne sont pas des DoTs.\n"
+        .. "Portée : distance d'affichage des barres de vie du jeu ; un mob plus loin "
+        .. "sort de la liste.", 24, -296, 410)
 
-    reloadButton = CreateFrame("Button", nil, Options, "UIPanelButtonTemplate")
-    reloadButton:SetSize(170, 24)
-    reloadButton:SetPoint("BOTTOMLEFT", 20, 20)
-    reloadButton:SetText("Recharger pour appliquer")
-    reloadButton:SetScript("OnClick", function() ReloadUI() end)
+    -- --- Disposition ----------------------------------------------------
+    AddSlider(pLayout, "Largeur des blocs", 80, 300, 5, 28, -98, "width", plain, ScheduleApply)
+    AddSlider(pLayout, "Échelle", 0.5, 2, 0.05, 28, -150, "scale",
+        function(v) return string.format("%.2f", v) end, ApplyScale)
+    AddSlider(pLayout, "Dixièmes de seconde sous", 0, 60, 1, 28, -202, "tenthsBelow", function(v)
+        if v <= 0 then return "jamais" elseif v >= 60 then return "toujours" end
+        return v .. " s"
+    end, ScheduleApply)
+    AddText(pLayout, "GameFontHighlight", "Sens d'empilement", 252, -84)
+    AddCheck(pLayout, "Vers le haut", 250, -102, "growUp", ApplySettings)
 
-    local close = CreateFrame("Button", nil, Options, "UIPanelButtonTemplate")
-    close:SetSize(100, 24)
+    -- --- Icônes ---------------------------------------------------------
+    AddSlider(pIcons, "Taille des icônes", 14, 40, 1, 28, -98, "iconSize", plain, ScheduleApply)
+    AddSlider(pIcons, "Espacement des icônes", 0, 10, 1, 28, -150, "iconSpacing", plain, ScheduleApply)
+    AddCheck(pIcons, "Balayage de recharge", 250, -84, "showSwipe", ApplySettings)
+
+    -- --- Profils (comme DoTimer) ----------------------------------------
+    local RefreshProfiles
+    AddText(pProf, "GameFontHighlight", "Profil de ce personnage", 26, -84)
+    local current = AddDropdown(pProf, 24, -101, 230, function(name)
+        if name ~= CurrentProfile() and SwitchProfile(name) then Say("profil « " .. name .. " ».") end
+        RefreshProfiles()
+    end)
+    AddText(pProf, "GameFontDisableSmall",
+        "Plusieurs personnages peuvent utiliser le même profil (les changements "
+        .. "s'appliquent alors à tous). « Commun » est celui des personnages sans profil choisi.",
+        26, -130, 410)
+
+    AddText(pProf, "GameFontHighlight", "Nouveau profil (à partir des réglages actuels)", 26, -172)
+    local edit = CreateFrame("EditBox", nil, pProf, "InputBoxTemplate")
+    edit:SetSize(180, 20)
+    edit:SetPoint("TOPLEFT", Options, "TOPLEFT", 32, -189)
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(32)
+    local create = AddButton(pProf, "Créer", 110, 22)
+    create:SetPoint("LEFT", edit, "RIGHT", 10, 0)
+    local function CreateProfile()
+        local name = (edit:GetText() or ""):match("^%s*(.-)%s*$")
+        if name == "" then return end
+        if root.profiles[name] then Say("le profil « " .. name .. " » existe déjà.") return end
+        if InCombatLockdown() then Say("changement de profil impossible en combat.") return end
+        root.profiles[name] = DeepCopy(db)
+        edit:SetText("")
+        edit:ClearFocus()
+        if SwitchProfile(name) then Say("profil « " .. name .. " » créé.") end
+        RefreshProfiles()
+    end
+    create:SetScript("OnClick", CreateProfile)
+    edit:SetScript("OnEnterPressed", CreateProfile)
+    edit:SetScript("OnEscapePressed", edit.ClearFocus)
+
+    AddText(pProf, "GameFontHighlight", "Autre profil", 26, -228)
+    local selected
+    local other = AddDropdown(pProf, 24, -245, 230, function(name)
+        selected = name
+        RefreshProfiles()
+    end)
+    local copyP = AddButton(pProf, "Copier ses réglages ici", 170, 22)
+    copyP:SetPoint("TOPLEFT", Options, "TOPLEFT", 24, -275)
+    Confirmable(copyP, "Copier ses réglages ici", function()
+        if not (selected and root.profiles[selected]) then return end
+        if InCombatLockdown() then Say("copie impossible en combat.") return end
+        local cur = CurrentProfile()
+        root.profiles[cur] = DeepCopy(root.profiles[selected])
+        if SwitchProfile(cur) then Say("réglages de « " .. selected .. " » copiés dans « " .. cur .. " ».") end
+        RefreshProfiles()
+    end)
+    local delP = AddButton(pProf, "Supprimer", 110, 22)
+    delP:SetPoint("LEFT", copyP, "RIGHT", 10, 0)
+    -- Les persos qui utilisaient le profil supprimé reviennent à « Commun »
+    Confirmable(delP, "Supprimer", function()
+        if not selected or selected == DEFAULT_PROFILE then return end
+        root.profiles[selected] = nil
+        for k, name in pairs(root.chars) do if name == selected then root.chars[k] = nil end end
+        Say("profil « " .. selected .. " » supprimé.")
+        selected = nil
+        RefreshProfiles()
+    end)
+
+    local resetP = AddButton(pProf, "Réinitialiser ce profil", 200, 22)
+    resetP:SetPoint("TOPLEFT", Options, "TOPLEFT", 24, -322)
+    -- Réglages par défaut ; l'ancre reste où elle est
+    Confirmable(resetP, "Réinitialiser ce profil", function()
+        if InCombatLockdown() then Say("réinitialisation impossible en combat.") return end
+        local keep = { point = db.point, relPoint = db.relPoint, x = db.x, y = db.y, copiedFromDoTimer = true }
+        local cur = CurrentProfile()
+        root.profiles[cur] = keep
+        if SwitchProfile(cur) then Say("profil « " .. cur .. " » réinitialisé.") end
+    end)
+
+    RefreshProfiles = function()
+        local cur = CurrentProfile()
+        local names = ProfileNames()
+        current:SetText(cur)
+        current.Fill(names, cur)
+        local others = {}
+        for _, n in ipairs(names) do if n ~= cur then others[#others + 1] = n end end
+        local still = false
+        for _, n in ipairs(others) do if n == selected then still = true end end
+        if not still then selected = nil end
+        other:SetText(selected or "|cff808080choisis un profil|r")
+        other.Fill(others, selected)
+        copyP:SetEnabled(selected ~= nil)
+        delP:SetEnabled(selected ~= nil and selected ~= DEFAULT_PROFILE)
+    end
+    refreshers[#refreshers + 1] = RefreshProfiles
+    for _, dd in ipairs({ current, other }) do
+        dd:SetScript("OnClick", function(self)
+            if self.menu:IsShown() then self.menu:Hide() else RefreshProfiles(); self.menu:Show() end
+        end)
+    end
+    pProf:SetScript("OnHide", function() current.menu:Hide(); other.menu:Hide() end)
+
+    -- --- Bas de fenêtre, sur toutes les pages ---------------------------
+    -- Mode test : jamais sauvegardé, coupé en combat et à la fermeture
+    AddCheck(Options, "Aperçu avec des cibles fictives", 20, -372,
+        { get = function() return testMode end, set = SetTestMode })
+    AddSlider(Options, "Cibles fictives", 1, TEST_MAX, 1, 270, -380, "testCount", plain, LayoutPreview)
+
+    local close = AddButton(Options, "Fermer", 100, 22)
     close:SetPoint("BOTTOMRIGHT", -20, 20)
-    close:SetText("Fermer")
     close:SetScript("OnClick", function() Options:Hide() end)
 
-    Options:SetScript("OnShow", function()
-        RefreshAll()
-        reloadButton:SetEnabled(reloadPending)
-    end)
+    Options:SetScript("OnShow", RefreshOptions)
+    Options:SetScript("OnHide", function() if testMode then SetTestMode(false) end end)
+    SelectTab(1)
 end
 
 ToggleOptions = function()
@@ -1035,6 +1460,7 @@ end
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+ev:RegisterEvent("PLAYER_REGEN_DISABLED")
 ev:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("PLAYER_TARGET_CHANGED")
@@ -1055,6 +1481,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
 
         local _, class = UnitClass("player")
         SPELL_IDS = CLASS_SPELLS[class]
+        testList = TEST_SPELLS[class]
         if not SPELL_IDS then
             Main:Hide()   -- classe sans liste de DoTs (prêtre et démoniste seulement)
             self:UnregisterAllEvents()
@@ -1068,9 +1495,17 @@ ev:SetScript("OnEvent", function(self, event, unit)
         Build()
 
     elseif event == "PLAYER_REGEN_ENABLED" then
-        if not built then Build() end
+        if applyPending then ApplySettings() elseif not built then Build() end
         if scalePending then ApplyScale() end
         if rangePending then ApplyPlateRange(true) end
+
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        -- le mode test est coupé en combat : seule la vraie liste compte
+        if testMode then
+            SetTestMode(false)
+            RefreshOptions()
+            Say("aperçu coupé (combat).")
+        end
 
     elseif event == "NAME_PLATE_UNIT_ADDED" or event == "NAME_PLATE_UNIT_REMOVED" then
         -- Un autre mob a pris (ou quitté) ce jeton : en-tête à jour, et on
@@ -1115,6 +1550,11 @@ SlashCmdList["DOTIMERPLATES"] = function(msg)
         db.locked = not db.locked
         UpdateAnchorVisual()
         Say(db.locked and "verrouillé" or "déverrouillé (glisse l'ancre pour la déplacer, clic droit = réglages)")
+    elseif cmd == "test" then
+        if InCombatLockdown() then Say("aperçu impossible en combat.") return end
+        SetTestMode(not testMode)
+        RefreshOptions()
+        Say(testMode and "aperçu avec des cibles fictives (/dtp test pour l'arrêter)." or "aperçu arrêté.")
     elseif cmd == "debug" then
         -- fonds colorés (bleu = en-tête, rouge = icônes), jetons npN, journal
         root.debug = not root.debug
@@ -1131,6 +1571,6 @@ SlashCmdList["DOTIMERPLATES"] = function(msg)
     elseif cmd == "" or cmd == "opt" or cmd == "options" then
         ToggleOptions()
     else
-        Say("/dtp (réglages), /dtp lock, /dtp status (diagnostic), /dtp debug")
+        Say("/dtp (réglages), /dtp test (aperçu), /dtp lock, /dtp status (diagnostic), /dtp debug")
     end
 end
