@@ -20,7 +20,7 @@ jobs:
       - name: Build the addon zip
         run: |
           mkdir DoTimerPlates
-          cp DoTimerPlates.toc DoTimerPlates.lua LICENSE DoTimerPlates/
+          cp -r DoTimerPlates.toc DoTimerPlates.lua LICENSE media DoTimerPlates/
           zip -r "DoTimerPlates-${GITHUB_REF_NAME}.zip" DoTimerPlates
 
       - name: Publish the release

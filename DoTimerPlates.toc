@@ -4,6 +4,7 @@
 ## Notes-frFR: Liste des mobs portant tes DoTs de prêtre ou de démoniste, propagation comprise, affichée par le cadre natif du jeu. Compagnon de DoTimer Forever.
 ## Author: MrGrandjojo
 ## Version: 1.4
+## IconTexture: Interface\AddOns\DoTimerPlates\media\icon.tga
 ## X-Website: https://github.com/MrGrandjojo/DoTimerPlates
 ## X-License: MIT
 ## OptionalDeps: DoTimerForever

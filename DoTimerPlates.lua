@@ -1259,6 +1259,10 @@ local function BuildOptions()
     local title = Options:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     title:SetPoint("TOP", 0, -16)
     title:SetText("|cff9482c9DoTimer|r Plates |cff888888v" .. ADDON_VERSION .. "|r")
+    local logo = Options:CreateTexture(nil, "ARTWORK")   -- icône de l'addon, comme DoTimer
+    logo:SetSize(28, 28)
+    logo:SetPoint("RIGHT", title, "LEFT", -6, 0)
+    logo:SetTexture("Interface\\AddOns\\DoTimerPlates\\media\\icon.tga")
 
     -- Onglets : une page par onglet, coordonnées relatives à la fenêtre
     local tabs = {}

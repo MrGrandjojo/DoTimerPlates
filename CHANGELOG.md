@@ -6,6 +6,7 @@
 - Profiles: a shared "Commun" profile (your previous settings) plus named profiles you create yourself (from the current settings). Each character picks its profile in a list; another profile's settings can be copied into the current one; a profile can be deleted or reset.
 - Settings apply immediately, no reload needed: the buttons created by the game are kept and restyled (as ForeverAuras does). During combat, changes wait for the end of combat.
 - Preview with 1 to 10 fake targets (option at the bottom of the window, or `/dtp test`). Off when combat starts and when the window closes.
+- Addon icon (addon list and options window).
 - Options window with tabs (General, Layout, Icons, Profiles), modeled on DoTimer Forever 0.9.6.
 - Health percentage at the right of the health bar, which grows from 3 to 5 px (option « % de vie », on by default).
 
