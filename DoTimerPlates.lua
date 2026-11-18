@@ -317,11 +317,31 @@ local function PlaceAnchor()
     Main:SetPoint(db.point or "CENTER", UIParent, db.relPoint or "CENTER", db.x or 250, db.y or 0)
 end
 
-local scalePending = false
-local function ApplyScale()
-    if InCombatLockdown() then scalePending = true return end
-    scalePending = false
+-- keepPosition (curseur d'échelle) : les décalages d'un cadre sont comptés à
+-- sa propre échelle, l'ancre glisserait donc vers le coin de l'écran. Son coin
+-- de départ (haut-gauche, ou bas-gauche si la liste monte) reste en place.
+-- Sans keepPosition (connexion, profil) : la position enregistrée correspond
+-- déjà à l'échelle du profil.
+local scalePending, scaleKeepPending = false, false
+local function ApplyScale(keepPosition)
+    if InCombatLockdown() then
+        scalePending = true
+        scaleKeepPending = scaleKeepPending or keepPosition == true
+        return
+    end
+    keepPosition = keepPosition == true or scaleKeepPending
+    scalePending, scaleKeepPending = false, false
+    local old = Main:GetScale()
+    local left, top, bottom = Main:GetLeft(), Main:GetTop(), Main:GetBottom()
     Main:SetScale(db.scale)
+    if keepPosition and left and top and bottom and math.abs(old - db.scale) > 0.0001 then
+        local k = old / db.scale
+        local point, y = "TOPLEFT", top * k
+        if db.growUp then point, y = "BOTTOMLEFT", bottom * k end
+        Main:ClearAllPoints()
+        Main:SetPoint(point, UIParent, "BOTTOMLEFT", left * k, y)
+        db.point, db.relPoint, db.x, db.y = point, "BOTTOMLEFT", left * k, y
+    end
 end
 
 Main:SetScript("OnDragStart", function(self)
@@ -1308,7 +1328,7 @@ local function BuildOptions()
     copy:SetScript("OnClick", function()
         if CopyFromDoTimer() then
             RefreshOptions()
-            ApplyScale()
+            ApplyScale(true)   -- l'ancre reste en place
             ApplySettings()
             Say("apparence de DoTimer recopiée dans le profil « " .. CurrentProfile() .. " ».")
         else
@@ -1324,7 +1344,7 @@ local function BuildOptions()
     -- --- Disposition ----------------------------------------------------
     AddSlider(pLayout, "Largeur des blocs", 80, 300, 5, 28, -98, "width", plain, ScheduleApply)
     AddSlider(pLayout, "Échelle", 0.5, 2, 0.05, 28, -150, "scale",
-        function(v) return string.format("%.2f", v) end, ApplyScale)
+        function(v) return string.format("%.2f", v) end, function() ApplyScale(true) end)
     AddSlider(pLayout, "Dixièmes de seconde sous", 0, 60, 1, 28, -202, "tenthsBelow", function(v)
         if v <= 0 then return "jamais" elseif v >= 60 then return "toujours" end
         return v .. " s"
