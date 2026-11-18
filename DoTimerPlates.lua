@@ -104,7 +104,7 @@ local DEFAULTS = {
 local MAX_PLATES  = 40
 local MAX_ICONS   = 8
 local TITLE_X     = 18     -- comme DoTimer
-local PCT_WIDTH   = 30     -- place du % de vie à droite de la barre
+local PCT_WIDTH   = 34     -- place du % de vie à droite de la barre
 local BLOCK_GAP   = 4      -- espace entre deux blocs, comme DoTimer
 local REFRESH     = 0.25   -- s : rafraîchissement des noms / flèches / vie
 local RAID_ICON_TEXT = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:16:16|t"
@@ -538,9 +538,10 @@ local function BuildHeader(row, index)
     -- v1.4 : % de vie à droite de la barre, aligné sur le bord du bloc.
     -- Rattaché à h : visible même sans barre.
     row.pct = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    -- Largeur libre : le texte prend sa taille réelle (« 100% » jamais coupé)
     row.pct:SetPoint("RIGHT", row.health, "RIGHT", PCT_WIDTH, 0)
-    row.pct:SetWidth(PCT_WIDTH - 2)
     row.pct:SetJustifyH("RIGHT")
+    row.pct:SetWordWrap(false)
     -- Police des chiffres de vie du cadre de joueur de Blizzard
     -- (TextStatusBarText : Arial Narrow, contour fin, sans ombre)
     local fo = TextStatusBarText or NumberFontNormalSmall
