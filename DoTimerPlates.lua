@@ -223,11 +223,13 @@ local function ComputeConfig()
     cfg.warnTime    = db.warnTime
     cfg.blinkPeriod = db.blinkPeriod
     cfg.all         = db.all
-    cfg.titleHeight = (cfg.showNames or cfg.showPct) and 15 or 0
+    cfg.titleHeight = cfg.showNames and 15 or 0
     cfg.healthY     = -cfg.titleHeight
-    if cfg.showHealth then
-        cfg.headerOffset = cfg.titleHeight + 6
-    elseif cfg.titleHeight > 0 then
+    -- La barre s'épaissit (3 -> 10 px) pour loger le % de vie en son milieu
+    cfg.barHeight   = cfg.showPct and 10 or 3
+    if cfg.showHealth or cfg.showPct then
+        cfg.headerOffset = cfg.titleHeight + cfg.barHeight + 3
+    elseif cfg.showNames then
         cfg.headerOffset = 16
     else
         cfg.headerOffset = 0
@@ -480,7 +482,6 @@ local function RefreshRow(row)
             row.raid:SetText(hasMark and string.format(RAID_ICON_TEXT, mark) or "")
             -- Le nom ne dépasse jamais la largeur du bloc (comme DoTimer)
             local room = cfg.width - TITLE_X - (target and 19 or 0) - (hasMark and 20 or 0)
-                - (cfg.showPct and 34 or 0)
             row.title:SetWidth(0)
             row.title:SetText(string.format("|cff%s[%s] %s|r", cfg.nameHex, lvlText, name))
             local natural = row.title:GetStringWidth()   -- secret pour un nom caché
@@ -521,7 +522,7 @@ local function BuildHeader(row, index)
     local c = db.healthColor
     row.health = CreateFrame("StatusBar", nil, h)
     row.health:SetPoint("TOPLEFT", h, "TOPLEFT", 0, cfg.healthY)
-    row.health:SetSize(cfg.width, 3)
+    row.health:SetSize(cfg.width, cfg.barHeight)
     row.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     row.health:SetStatusBarColor(c.r, c.g, c.b)
     row.health:SetMinMaxValues(0, 1)
@@ -531,15 +532,20 @@ local function BuildHeader(row, index)
     bg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
     row.health:SetShown(cfg.showHealth)
 
-    -- v1.4 : % de vie, à droite de la ligne du nom
-    row.pct = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.pct:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, -1)
-    row.pct:SetJustifyH("RIGHT")
+    -- v1.4 : % de vie au milieu de la barre, contour noir pour rester lisible
+    -- sur le vert comme sur le fond. Rattaché à h : visible même sans barre.
+    local over = CreateFrame("Frame", nil, h)
+    over:SetAllPoints(row.health)
+    over:SetFrameLevel(row.health:GetFrameLevel() + 2)
+    row.pct = over:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.pct:SetPoint("CENTER", over, "CENTER", 0, 0)
+    local font = GameFontHighlightSmall and GameFontHighlightSmall:GetFont()
+    if font then pcall(row.pct.SetFont, row.pct, font, 9, "OUTLINE") end
     row.pct:SetShown(cfg.showPct)
 
     -- Mode debug : numéro du jeton de barre de vie
     row.token = h:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", cfg.showPct and -36 or 0, 0)
+    row.token:SetPoint("TOPRIGHT", h, "TOPRIGHT", 0, 0)
     row.token:SetText("np" .. index)
     row.token:SetShown(root.debug == true)
 end
