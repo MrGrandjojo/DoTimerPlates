@@ -87,7 +87,7 @@ local DEFAULTS = {
     growUp         = false,
     showNames      = true,
     showHealth     = true,
-    showHealthPct  = true,    -- v1.4 : % de vie à droite de la ligne du nom
+    showHealthPct  = true,    -- v1.4 : % de vie à droite de la barre de vie
     showRaidMarks  = true,
     showSwipe      = true,
     tenthsBelow    = 60,      -- dixièmes sous N s : 0 = jamais, 60 = toujours
@@ -104,6 +104,7 @@ local DEFAULTS = {
 local MAX_PLATES  = 40
 local MAX_ICONS   = 8
 local TITLE_X     = 18     -- comme DoTimer
+local PCT_WIDTH   = 30     -- place du % de vie à droite de la barre
 local BLOCK_GAP   = 4      -- espace entre deux blocs, comme DoTimer
 local REFRESH     = 0.25   -- s : rafraîchissement des noms / flèches / vie
 local RAID_ICON_TEXT = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:16:16|t"
@@ -224,11 +225,13 @@ local function ComputeConfig()
     cfg.blinkPeriod = db.blinkPeriod
     cfg.all         = db.all
     cfg.titleHeight = cfg.showNames and 15 or 0
-    cfg.healthY     = -cfg.titleHeight
-    -- La barre s'épaissit (3 -> 5 px) pour porter le % de vie en son milieu
+    -- Avec le % : barre de 5 px, raccourcie de PCT_WIDTH, centrée sur une
+    -- ligne de 10 px (hauteur du texte) ; sinon la fine ligne de 3 px de DoTimer
     cfg.barHeight   = cfg.showPct and 5 or 3
+    cfg.barWidth    = cfg.showPct and cfg.width - PCT_WIDTH or cfg.width
+    cfg.healthY     = -cfg.titleHeight - (cfg.showPct and 2 or 0)
     if cfg.showHealth or cfg.showPct then
-        cfg.headerOffset = cfg.titleHeight + cfg.barHeight + 3
+        cfg.headerOffset = cfg.titleHeight + (cfg.showPct and 12 or cfg.barHeight + 3)
     elseif cfg.showNames then
         cfg.headerOffset = 16
     else
@@ -522,7 +525,7 @@ local function BuildHeader(row, index)
     local c = db.healthColor
     row.health = CreateFrame("StatusBar", nil, h)
     row.health:SetPoint("TOPLEFT", h, "TOPLEFT", 0, cfg.healthY)
-    row.health:SetSize(cfg.width, cfg.barHeight)
+    row.health:SetSize(cfg.barWidth, cfg.barHeight)
     row.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
     row.health:SetStatusBarColor(c.r, c.g, c.b)
     row.health:SetMinMaxValues(0, 1)
@@ -532,13 +535,12 @@ local function BuildHeader(row, index)
     bg:SetColorTexture(0.12, 0.12, 0.12, 0.8)
     row.health:SetShown(cfg.showHealth)
 
-    -- v1.4 : % de vie au milieu de la barre, contour noir pour rester lisible
-    -- sur le vert comme sur le fond. Rattaché à h : visible même sans barre.
-    local over = CreateFrame("Frame", nil, h)
-    over:SetAllPoints(row.health)
-    over:SetFrameLevel(row.health:GetFrameLevel() + 2)
-    row.pct = over:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.pct:SetPoint("CENTER", over, "CENTER", 0, 0)
+    -- v1.4 : % de vie à droite de la barre, aligné sur le bord du bloc.
+    -- Rattaché à h : visible même sans barre.
+    row.pct = h:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.pct:SetPoint("RIGHT", row.health, "RIGHT", PCT_WIDTH, 0)
+    row.pct:SetWidth(PCT_WIDTH - 2)
+    row.pct:SetJustifyH("RIGHT")
     -- Police des chiffres de vie du cadre de joueur de Blizzard
     -- (TextStatusBarText : Arial Narrow, contour fin, sans ombre)
     local fo = TextStatusBarText or NumberFontNormalSmall
