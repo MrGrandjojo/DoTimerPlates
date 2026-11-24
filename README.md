@@ -16,6 +16,7 @@ DoTimer Plates takes a different route. It uses the game's native aura display (
 - One icon per DoT with its countdown, sorted by remaining time (next to expire first).
 - Expiry warning: during the last seconds the countdown and a thin border around the icon blink in the warning color.
 - Enemies without your DoTs take no space; the list stays compact.
+- An enemy you cast one of your DoTs on stays listed (name and health) when its DoTs run out, until it dies, its nameplate disappears or combat ends (option « Garder les mobs DoTés », on by default).
 - Works in the open world and in instances, where enemy names are hidden from addons.
 - On first launch, the look of your DoTimer Forever profile is copied: sizes, colors, tenths of a second, warning threshold and blink rate.
 - Options window with tabs (General, Layout, Icons, Profiles): `/dtp`, or right-click the anchor while it is unlocked. Changes apply immediately (at the end of combat if you are fighting).
@@ -52,6 +53,7 @@ If you download the repository with *Code → Download ZIP* instead, rename the 
 These come from what the game allows, not from the addon:
 
 - **An enemy without a visible nameplate is not listed**, for example when it is too far away, off screen, or its nameplate is removed by the game (in instances this can happen when you change target). The "Nameplate range" option raises the game's nameplate distance.
+- **Only your own casts keep an enemy listed** once its DoTs are gone: an enemy that only received a spread DoT leaves the list when the DoT ends, because the addon cannot see that DoT.
 - **No predicted-damage bar and no fading icon.** Both would need the remaining time in Lua, which the game keeps secret. The warning blinks the countdown and the border instead.
 - **Shadow Priest and Warlock only** for now. Other classes leave the addon idle.
 - Warlock support is new and not tested in game yet: some WoW Forever-specific spells (runes, Curse of Doom, Curse of Shadow) are not in the list yet.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5
+
+- Enemies you cast one of your DoTs on stay in the list (name, health bar, health percentage) after their DoTs run out, until they die, their nameplate is removed or combat ends. Option « Garder les mobs DoTés » (General tab), on by default. Enemies that only received a spread DoT are not kept: the addon only sees your own casts.
+- Debug mode: the kept frames have a green background, and keeping / releasing an enemy is logged in the chat.
+
 ## 1.4
 
 - Warlock support: Corruption, Curse/Bane of Agony, Immolate, Siphon Life and the curses (Elements, Weakness, Recklessness, Tongues, Exhaustion), all ranks. Rank IDs come from DoTimer Forever's Warlock edition. Channels (Drain Life, Drain Soul, Drain Mana, Wrack) are not shown.

@@ -1,5 +1,5 @@
 -- =========================================================================
--- DoTimer Plates v1.4
+-- DoTimer Plates v1.5
 -- Liste des mobs qui portent tes DoTs (prêtre Ombre ou démoniste), avec nom,
 -- barre de vie et timers, y compris les DoTs propagés par talent (Peste
 -- dévorante, Douleur) ou posés sans lancer direct.
@@ -30,6 +30,14 @@
 -- bloc vide ne prend aucune place (technique reprise de ForeverAuras).
 -- Le jeu place les boutons natifs mais ne les dimensionne pas : on le fait.
 --
+-- v1.5 : mobs DoTés gardés. Devant chaque bloc, un cadre à nous ("keep"),
+-- 1 pixel d'habitude. Quand tu lances un de tes DoTs sur un mob (ton propre
+-- lancer, lisible), son bloc devient "gardé" : le cadre keep prend la hauteur
+-- d'un en-tête et le conteneur d'en-tête natif est désactivé (sinon deux
+-- en-têtes s'additionneraient). L'en-tête reste donc affiché sans DoT, jusqu'à
+-- la mort du mob, le retrait de sa barre de vie ou la fin du combat. Un DoT
+-- seulement propagé (sans lancer) ne garde pas le mob : le Lua ne le voit pas.
+--
 -- Limites connues (le jeu, pas l'addon) : un mob sans barre de vie affichée
 -- (trop loin, hors écran, retirée par le jeu en instance) sort de la liste ;
 -- pas de barre de dégâts prévus (il faudrait connaître le temps restant en
@@ -46,7 +54,7 @@
 -- =========================================================================
 
 local issecret = issecretvalue or function() return false end
-local ADDON_VERSION = "1.4"
+local ADDON_VERSION = "1.5"
 
 -- -------------------------------------------------------------------------
 -- Sorts suivis par classe : tous les rangs (le cadre natif compare les ID
@@ -101,6 +109,7 @@ local DEFAULTS = {
     blinkPeriod    = 1.2,     -- s par clignotement, comme DoTimer
     all            = false,   -- true : tous tes debuffs, pas seulement les DoTs
     testCount      = 5,       -- v1.4 : nombre de cibles du mode test
+    keepDotted     = true,    -- v1.5 : un mob DoTé reste listé jusqu'à sa mort
     nameColor     = { r = 1.00, g = 1.00, b = 1.00 },
     healthColor    = { r = 0.25, g = 0.85, b = 0.25 },
     timerTextColor = { r = 1.00, g = 1.00, b = 1.00 },
@@ -230,6 +239,7 @@ local function ComputeConfig()
     cfg.warnTime    = db.warnTime
     cfg.blinkPeriod = db.blinkPeriod
     cfg.all         = db.all
+    cfg.keep        = db.keepDotted
     cfg.titleHeight = cfg.showNames and 15 or 0
     -- Avec le % : barre de 5 px, raccourcie de PCT_WIDTH, centrée sur une
     -- ligne de 10 px (hauteur du texte) ; sinon la fine ligne de 3 px de DoTimer
@@ -531,7 +541,8 @@ end
 -- Créé une fois ; tailles, positions et couleurs posées par StyleHeader.
 local function CreateHeader(row, parent, index)
     local clip = NewPlainFrame(parent)
-    clip:SetPoint("TOPLEFT", row.head, "TOPLEFT", 0, 0)
+    -- v1.5 : du haut du cadre keep (1 px, sauf mob gardé) au bas de l'en-tête
+    clip:SetPoint("TOPLEFT", row.keep or row.head, "TOPLEFT", 0, 0)
     clip:SetPoint("BOTTOMRIGHT", row.head, "BOTTOMRIGHT", 0, 0)
     clip:SetClipsChildren(true)
     row.clip = clip
@@ -717,17 +728,29 @@ end
 -- Empile des blocs { head, icons } à partir de prev ; renvoie le dernier
 -- cadre de la chaîne. Chaque élément a 1 pixel de plus que son contenu,
 -- chaque ancrage le retire (un conteneur vide ne prend aucune place).
+-- v1.5 : le cadre keep (vrais blocs seulement) se place juste au-dessus de
+-- l'en-tête, avec la même règle du pixel en plus.
 local function ChainBlocks(list, prev, first)
     for _, b in ipairs(list) do
         b.head:ClearAllPoints()
         b.icons:ClearAllPoints()
+        if b.keep then b.keep:ClearAllPoints() end
         if cfg.growUp then
             -- vers le haut : icônes posées sur le bloc précédent, en-tête au-dessus
             b.icons:SetPoint("BOTTOMLEFT", prev, "TOPLEFT", 0, first and BLOCK_GAP or -1)
             b.head:SetPoint("BOTTOMLEFT", b.icons, "TOPLEFT", 0, -1)
             prev = b.head
+            if b.keep then
+                b.keep:SetPoint("BOTTOMLEFT", b.head, "TOPLEFT", 0, -1)
+                prev = b.keep
+            end
         else
-            b.head:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, first and 0 or 1)
+            if b.keep then
+                b.keep:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, first and 0 or 1)
+                b.head:SetPoint("TOPLEFT", b.keep, "BOTTOMLEFT", 0, 1)
+            else
+                b.head:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, first and 0 or 1)
+            end
             b.icons:SetPoint("TOPLEFT", b.head, "BOTTOMLEFT", 0, 1)
             prev = b.icons
         end
@@ -746,7 +769,7 @@ local function Candidates()
     return { includeSpellIDs = ids }
 end
 
--- Fonds colorés du mode debug (bleu = en-tête, rouge = icônes)
+-- Fonds colorés du mode debug (bleu = en-tête, rouge = icônes, vert = keep)
 local debugTextures = {}
 local function DebugBackground(c, r, g, b)
     local t = c:CreateTexture(nil, "BACKGROUND")
@@ -810,7 +833,10 @@ local function Build()
 
     local prev = Main
     for i = 1, MAX_PLATES do
-        local row = { unit = "nameplate" .. i }
+        local row = { unit = "nameplate" .. i, serial = 0 }
+        row.keep = NewPlainFrame(Main)
+        row.keep:SetSize(cfg.width, 1)
+        DebugBackground(row.keep, 0, 1, 0)
         row.head = NewContainer(0, 0.4, 1)
         row.icons = NewContainer(1, 0, 0)
         if not (row.head and row.icons) then break end
@@ -827,6 +853,128 @@ local function Build()
         stats.built = i
     end
     chainTail = prev
+end
+
+-- -------------------------------------------------------------------------
+-- v1.5 : mobs DoTés gardés dans la liste (voir l'en-tête du fichier).
+-- Le seul signal lisible est TON lancer : UNIT_SPELLCAST_* du joueur donne
+-- le sort, et UnitIsUnit(cible, nameplateN) reste lisible en instance.
+-- -------------------------------------------------------------------------
+local trackedIDs = {}          -- ID de sort suivi -> true (classe du joueur)
+
+-- Mort lisible ? Une réponse cachée (secrète) compte comme vivant.
+local function IsDead(unit)
+    local ok, dead = pcall(UnitIsDead, unit)
+    return ok and not issecret(dead) and dead == true
+end
+
+-- Hors instance, l'identifiant (GUID) d'un mob est lisible : un mob gardé
+-- qui perd sa barre de vie (trop loin) est de nouveau gardé à son retour.
+-- En instance il est caché : la garde se perd avec la barre de vie.
+local keptGUIDs = {}           -- GUID lisible -> true
+local function ReadableGUID(unit)
+    local ok, guid = pcall(UnitGUID, unit)
+    if ok and type(guid) == "string" and not issecret(guid) then return guid end
+end
+
+-- forget : le mob est mort, il ne sera pas regardé à son retour
+local function SetSticky(row, on, forget)
+    on = (on and cfg.keep) and true or false
+    if forget and row.guid then keptGUIDs[row.guid] = nil end
+    if (row.sticky or false) == on then return end
+    row.sticky = on
+    row.guid = on and ReadableGUID(row.unit) or nil
+    if row.guid then keptGUIDs[row.guid] = true end
+    Write(row.keep.SetHeight, row.keep, on and cfg.headH or 1)
+    -- En-tête natif coupé tant que le mob est gardé : l'en-tête vient alors
+    -- du cadre keep, qu'il y ait des DoTs ou non (jamais deux en-têtes)
+    Try("en-tête natif (mob gardé)", row.head, "SetEnabled", not on)
+    if not on then pcall(row.head.UpdateAllAuras, row.head) end
+    RefreshRow(row)
+    if root.debug then
+        Say(string.format("[%.1f] %s %s", GetTime(), row.unit,
+            on and "|cff40ff40gardé (DoT lancé)|r" or "|cffffd040n'est plus gardé|r"))
+    end
+end
+
+local function UnstickAll()
+    for _, row in ipairs(rows) do SetSticky(row, false) end
+end
+
+-- Bloc dont la barre de vie est cette unité (target, mouseover...)
+local function RowOf(unit)
+    if not unit or not UnitExists(unit) then return nil end
+    for _, row in ipairs(rows) do
+        if UnitExists(row.unit) then
+            local ok, same = pcall(UnitIsUnit, unit, row.unit)
+            if ok and not issecret(same) and same then return row end
+        end
+    end
+end
+
+local function ReadableName(unit)
+    local ok, name = pcall(UnitName, unit)
+    if ok and type(name) == "string" and not issecret(name) then return name end
+end
+
+-- true / false, ou nil si la réponse est cachée
+local function CanAttack(unit)
+    local ok, hostile = pcall(UnitCanAttack, "player", unit)
+    if not ok or issecret(hostile) then return nil end
+    return hostile and true or false
+end
+
+-- Unité visée par un lancer, comme DoTimer : nom envoyé par
+-- UNIT_SPELLCAST_SENT (macros @mouseover / @focus, lisible hors instance),
+-- sinon la cible, sinon la cible de la cible (cible amicale)
+local CAST_UNITS = { "target", "mouseover", "focus", "targettarget" }
+local function CastUnit(sentName)
+    if sentName then
+        for _, unit in ipairs(CAST_UNITS) do
+            if ReadableName(unit) == sentName and CanAttack(unit) then return unit end
+        end
+    end
+    if CanAttack("target") ~= false then return "target" end
+    if CanAttack("targettarget") then return "targettarget" end
+end
+
+local sentNames = {}           -- castGUID -> nom de la destination
+local castRows = {}            -- castGUID -> { row, serial } au début d'un lancer long
+
+local function Readable(v) return v ~= nil and not issecret(v) end
+
+local function OnPlayerCast(event, castGUID, a, b)
+    if not cfg.keep then return end
+    if not Readable(castGUID) then castGUID = nil end
+    if event == "UNIT_SPELLCAST_SENT" then
+        -- arguments : nom de la destination, castGUID, spellID
+        local name, guid = castGUID, a
+        if Readable(guid) and type(name) == "string" and name ~= "" then sentNames[guid] = name end
+        return
+    end
+    local spellID = a
+    if not castGUID then return end
+    if event == "UNIT_SPELLCAST_START" then
+        -- lancer long : le mob visé au début compte, même si la cible change
+        if Readable(spellID) and trackedIDs[spellID] then
+            local row = RowOf(CastUnit(sentNames[castGUID]))
+            castRows[castGUID] = row and { row = row, serial = row.serial } or nil
+        end
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local started = castRows[castGUID]
+        local sent = sentNames[castGUID]
+        castRows[castGUID], sentNames[castGUID] = nil, nil
+        if not (Readable(spellID) and trackedIDs[spellID]) then return end
+        if started then
+            -- la barre de vie a changé de mob pendant le lancer : rien
+            if started.row.serial == started.serial then SetSticky(started.row, true) end
+        else
+            local row = RowOf(CastUnit(sent))
+            if row then SetSticky(row, true) end
+        end
+    else   -- STOP / FAILED / INTERRUPTED
+        castRows[castGUID], sentNames[castGUID] = nil, nil
+    end
 end
 
 -- -------------------------------------------------------------------------
@@ -990,7 +1138,9 @@ local function Relayout()
     end
     local filtersChanged = cfg.all ~= builtAll
     builtAll = cfg.all
+    if not cfg.keep then UnstickAll() end
     for _, row in ipairs(rows) do
+        row.keep:SetSize(cfg.width, row.sticky and cfg.headH or 1)
         GroupLayout(row.head, "Head", cfg.width, cfg.headH, 0)
         GroupLayout(row.icons, "Auras", cfg.iconSize, cfg.iconH, cfg.iconSpacing)
         if filtersChanged then
@@ -1327,6 +1477,7 @@ local function BuildOptions()
             Options.rangeToken = token
             C_Timer.After(0.6, function() if Options.rangeToken == token then ApplyPlateRange(true) end end)
         end, GetPlateRange)
+    AddCheck(pGeneral, "Garder les mobs DoTés", 250, -228, "keepDotted", ApplySettings)
     local copy = AddButton(pGeneral, "Reprendre l'apparence de DoTimer", 240, 22)
     copy:SetPoint("TOPLEFT", Options, "TOPLEFT", 22, -256)
     copy:SetScript("OnClick", function()
@@ -1342,6 +1493,8 @@ local function BuildOptions()
     AddText(pGeneral, "GameFontDisableSmall",
         "Les réglages s'appliquent tout de suite (à la fin du combat si tu combats).\n"
         .. "Tous mes debuffs : affiche aussi tes affaiblissements qui ne sont pas des DoTs.\n"
+        .. "Garder les mobs DoTés : un mob sur lequel tu lances un DoT reste listé "
+        .. "jusqu'à sa mort ou la fin du combat.\n"
         .. "Portée : distance d'affichage des barres de vie du jeu ; un mob plus loin "
         .. "sort de la liste.", 24, -296, 410)
 
@@ -1490,8 +1643,17 @@ ev:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 ev:RegisterEvent("PLAYER_TARGET_CHANGED")
 ev:RegisterEvent("UNIT_HEALTH")
 ev:RegisterEvent("RAID_TARGET_UPDATE")
+-- v1.5 : tes lancers, pour garder les mobs DoTés
+for _, e in ipairs({ "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_SUCCEEDED",
+    "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
+    ev:RegisterUnitEvent(e, "player")
+end
 
-ev:SetScript("OnEvent", function(self, event, unit)
+ev:SetScript("OnEvent", function(self, event, unit, a1, a2, a3)
+    if event:find("^UNIT_SPELLCAST_") then
+        if unit == "player" and built then OnPlayerCast(event, a1, a2, a3) end
+        return
+    end
     if event == "PLAYER_LOGIN" then
         -- Base et profil ouverts ici : le nom du perso et du royaume sont connus
         InitProfiles()
@@ -1506,6 +1668,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
         local _, class = UnitClass("player")
         SPELL_IDS = CLASS_SPELLS[class]
         testList = TEST_SPELLS[class]
+        for _, id in ipairs(SPELL_IDS or {}) do trackedIDs[id] = true end
         if not SPELL_IDS then
             Main:Hide()   -- classe sans liste de DoTs (prêtre et démoniste seulement)
             self:UnregisterAllEvents()
@@ -1519,6 +1682,11 @@ ev:SetScript("OnEvent", function(self, event, unit)
         Build()
 
     elseif event == "PLAYER_REGEN_ENABLED" then
+        -- fin du combat : plus aucun mob gardé (tes DoTs ne tournent plus)
+        UnstickAll()
+        wipe(sentNames)
+        wipe(castRows)
+        wipe(keptGUIDs)
         if applyPending then ApplySettings() elseif not built then Build() end
         if scalePending then ApplyScale() end
         if rangePending then ApplyPlateRange(true) end
@@ -1536,6 +1704,12 @@ ev:SetScript("OnEvent", function(self, event, unit)
         -- demande au jeu de relire ses auras
         local row = rowByUnit[unit]
         if row then
+            -- v1.5 : nouveau mob (ou plus de mob) sur ce jeton : plus gardé
+            row.serial = row.serial + 1
+            SetSticky(row, false)
+            -- hors instance : mob gardé revenu à portée, de nouveau gardé
+            local guid = event == "NAME_PLATE_UNIT_ADDED" and ReadableGUID(unit)
+            if guid and keptGUIDs[guid] and not IsDead(unit) then SetSticky(row, true) end
             RefreshRow(row)
             pcall(row.head.UpdateAllAuras, row.head)
             pcall(row.icons.UpdateAllAuras, row.icons)
@@ -1550,6 +1724,7 @@ ev:SetScript("OnEvent", function(self, event, unit)
 
     elseif event == "UNIT_HEALTH" then
         local row = rowByUnit[unit]
+        if row and row.sticky and IsDead(unit) then SetSticky(row, false, true) end
         if row and (cfg.showHealth or cfg.showPct) then SetHealth(row) end
     end
 end)
@@ -1561,7 +1736,12 @@ ev:SetScript("OnUpdate", function(self, elapsed)
     elapsedSince = elapsedSince + elapsed
     if elapsedSince < REFRESH then return end
     elapsedSince = 0
-    for _, row in ipairs(rows) do RefreshRow(row) end
+    for _, row in ipairs(rows) do
+        -- mob gardé mort (ou barre disparue sans événement) : plus gardé
+        if row.sticky and not UnitExists(row.unit) then SetSticky(row, false)
+        elseif row.sticky and IsDead(row.unit) then SetSticky(row, false, true) end
+        RefreshRow(row)
+    end
 end)
 
 -- -------------------------------------------------------------------------
@@ -1580,7 +1760,7 @@ SlashCmdList["DOTIMERPLATES"] = function(msg)
         RefreshOptions()
         Say(testMode and "aperçu avec des cibles fictives (/dtp test pour l'arrêter)." or "aperçu arrêté.")
     elseif cmd == "debug" then
-        -- fonds colorés (bleu = en-tête, rouge = icônes), jetons npN, journal
+        -- fonds colorés (bleu = en-tête, rouge = icônes, vert = keep), jetons npN, journal
         root.debug = not root.debug
         for _, t in ipairs(debugTextures) do t:SetShown(root.debug) end
         for _, row in ipairs(rows) do row.token:SetShown(root.debug) end
