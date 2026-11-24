@@ -12,7 +12,7 @@ DoTimer Plates takes a different route. It uses the game's native aura display (
 
 ## Features
 
-- One block per enemy carrying at least one of your DoTs: `>> [level] name <<` (the arrows mark your target), raid mark, health bar and health percentage (option « % de vie »).
+- One block per enemy carrying at least one of your DoTs: `>> [level] name <<` (the arrows and a golden band behind the name mark your target), raid mark, health bar and health percentage (option « % de vie »).
 - One icon per DoT with its countdown, sorted by remaining time (next to expire first).
 - Expiry warning: during the last seconds the countdown and a thin border around the icon blink in the warning color.
 - Enemies without your DoTs take no space; the list stays compact.

@@ -121,6 +121,7 @@ local MAX_ICONS   = 8
 local TITLE_X     = 18     -- comme DoTimer
 local PCT_WIDTH   = 34     -- place du % de vie à droite de la barre
 local BLOCK_GAP   = 4      -- espace entre deux blocs, comme DoTimer
+local BAND_COLOR  = { r = 1.00, g = 0.78, b = 0.10 }   -- v1.5 : bande de la cible, jaune doré
 local REFRESH     = 0.25   -- s : rafraîchissement des noms / flèches / vie
 local RAID_ICON_TEXT = "|TInterface\\TargetingFrame\\UI-RaidTargetingIcon_%d:16:16|t"
 
@@ -506,6 +507,7 @@ local function SetTitle(row, lvlText, name, target, hasMark, mark)
     row.arrow:SetText(target and "|cffff2020>>|r" or "")
     row.tail:SetText(target and "|cffff2020<<|r" or "")
     row.raid:SetText(hasMark and string.format(RAID_ICON_TEXT, mark) or "")
+    row.band:SetShown(target and true or false)
     local room = cfg.width - TITLE_X - (target and 19 or 0) - (hasMark and 20 or 0)
     row.title:SetWidth(0)
     row.title:SetText(string.format("|cff%s[%s] %s|r", cfg.nameHex, lvlText, name))
@@ -551,6 +553,11 @@ local function CreateHeader(row, parent, index)
     h:SetPoint("TOPLEFT", clip, "TOPLEFT", 0, -BLOCK_GAP)
     row.h = h
 
+    -- v1.5 : bande derrière le nom de ta cible, dorée à gauche et qui
+    -- s'estompe vers la droite (couleur et place posées par StyleHeader)
+    row.band = h:CreateTexture(nil, "BACKGROUND")
+    row.band:Hide()
+
     -- [>>] [niveau] nom [<<] [marque], comme DoTimer
     row.title = h:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     row.title:SetPoint("TOPLEFT", h, "TOPLEFT", TITLE_X, 0)
@@ -595,6 +602,17 @@ end
 local function StyleHeader(row)
     row.h:SetSize(cfg.width, math.max(cfg.headerOffset, 1))
     for _, fs in ipairs({ row.title, row.arrow, row.tail, row.raid }) do fs:SetShown(cfg.showNames) end
+    -- bande de la cible : sur la ligne du nom, 2 px de marge au-dessus
+    row.band:ClearAllPoints()
+    row.band:SetPoint("TOPLEFT", row.h, "TOPLEFT", 0, 2)
+    row.band:SetSize(cfg.width, cfg.titleHeight + 1)
+    local tb = BAND_COLOR
+    row.band:SetColorTexture(1, 1, 1, 1)
+    if not (CreateColor and pcall(row.band.SetGradient, row.band, "HORIZONTAL",
+        CreateColor(tb.r, tb.g, tb.b, 0.65), CreateColor(tb.r, tb.g, tb.b, 0.10))) then
+        row.band:SetColorTexture(tb.r, tb.g, tb.b, 0.45)   -- sans dégradé
+    end
+    if not cfg.showNames then row.band:Hide() end   -- pas de nom, pas de bande
     local c = db.healthColor
     -- Avec le % : barre de 5 px raccourcie ; sinon la fine ligne de 3 px de DoTimer
     row.health:ClearAllPoints()

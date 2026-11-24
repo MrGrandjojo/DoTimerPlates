@@ -3,6 +3,7 @@
 ## 1.5
 
 - Enemies you cast one of your DoTs on stay in the list (name, health bar, health percentage) after their DoTs run out, until they die, their nameplate is removed or combat ends. Option « Garder les mobs DoTés » (General tab), on by default. Enemies that only received a spread DoT are not kept: the addon only sees your own casts.
+- Your target's name sits on a golden band that fades to the right, so it stands out among several DoTed enemies (the `>> <<` arrows stay).
 - Debug mode: the kept frames have a green background, and keeping / releasing an enemy is logged in the chat.
 
 ## 1.4
