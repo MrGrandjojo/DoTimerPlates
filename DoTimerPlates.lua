@@ -545,7 +545,9 @@ local function CreateHeader(row, parent, index)
     local clip = NewPlainFrame(parent)
     -- v1.5 : du haut du cadre keep (1 px, sauf mob gardé) au bas de l'en-tête
     clip:SetPoint("TOPLEFT", row.keep or row.head, "TOPLEFT", 0, 0)
-    clip:SetPoint("BOTTOMRIGHT", row.head, "BOTTOMRIGHT", 0, 0)
+    -- Largeur posée par StyleHeader, jamais prise sur le conteneur natif :
+    -- désactivé (mob gardé), il ne fait plus qu'1 pixel de large
+    clip:SetPoint("BOTTOMLEFT", row.head, "BOTTOMLEFT", 0, 0)
     clip:SetClipsChildren(true)
     row.clip = clip
 
@@ -600,6 +602,7 @@ local function CreateHeader(row, parent, index)
 end
 
 local function StyleHeader(row)
+    row.clip:SetWidth(cfg.width)
     row.h:SetSize(cfg.width, math.max(cfg.headerOffset, 1))
     for _, fs in ipairs({ row.title, row.arrow, row.tail, row.raid }) do fs:SetShown(cfg.showNames) end
     -- bande de la cible : sur la ligne du nom, 2 px de marge au-dessus
